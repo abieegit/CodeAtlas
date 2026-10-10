@@ -1,0 +1,10 @@
+# Taste
+- Prefers minimal changes that do only what's necessary — avoid creating new/extra files beyond what the task requires. Confidence: 0.9
+- Wants the existing architecture and design left intact on follow-up work — fixes should stay config-level (e.g. tweaking `.env` values) rather than restructuring code. Confidence: 0.75
+- Values a concise, to-the-point approach that minimizes future debugging time; dislikes over-engineering/scaffolding. Confidence: 0.8
+- Wants the assistant to call out simple, low-effort tasks the user can do themselves to unblock progress. Confidence: 0.7
+- Expects the assistant to verify against the actual filesystem/codebase (list the real directories, check what exists) before making claims or declaring work done — do not assume from a partial view. Confidence: 0.7
+- Wants exact, concrete, step-by-step run/setup instructions with copy-pasteable commands and expected outputs, rather than high-level guidance. Confidence: 0.6
+- Wants comprehensive, minute-detail documentation (file-by-file walkthroughs, end-to-end execution flow, and a "before vs. after" account of architecture changes), written in plain text and presentation-ready for a supervisor. Confidence: 0.7
+- Wants a versioned build log maintained as one file per major build increment, opened at the start of a build and closed when the next begins (typically triggered by a supervisor meeting). Confidence: 0.85
+- Wants each build-log entry to carry a unique file name, build number, and build name, plus the build context (meeting goal and targets), all current features, the complete technology stack (with exact versions), and the end-to-end flow of execution. Confidence: 0.85

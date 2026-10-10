@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+
+# Never commit environment secrets
+.env
+.env.*
+
+# Uploaded archives + extracted repositories
+uploads/
+extracted/
+
+# Logs
+*.log

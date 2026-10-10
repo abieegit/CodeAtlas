@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(dir:*)",
+      "Shell(npx tsc --noEmit)",
+      "Shell(npx ts-node src/test-parser.ts)",
+      "Shell(npx ts-node src/test-analysis.ts)",
+      "Shell(npx ts-node src/test-resolver.ts)",
+      "Shell(npx ts-node src/_probe.ts)",
+      "Shell(npx ts-node src/test-parser.ts > ..\\scratch-out-parser.txt 2>&1; if ($?) { Write-Output \"PARSER-OK\" } else { Write-Output \"PARSER-FAIL\"; Get-Content ..\\scratch-out-parser.txt })",
+      "Shell(npx ts-node src/test-analysis.ts 2 >& 1)",
+      "Shell(Select-String:*)",
+      "Shell(npx ts-node src/test-repository.ts)",
+      "Shell(findstr:*)",
+      "Shell(del /q \"D:\\University\\FYP\\implementation\\codeatlas-prototype\\backend\\src\\_probe.ts\" 2>nul & del /q \"D:\\University\\FYP\\implementation\\codeatlas-prototype\\scratch-out-parser.txt\" 2>nul & echo CLEANED)",
+      "Shell(git:*)",
+      "Shell(node --version)",
+      "Shell(npm:*)",
+      "Shell(npx ts-node src/test-analysis.ts > \"C:\\Users\\abdul\\AppData\\Local\\Temp\\commandcode\\D--University-FYP-implementation-codeatlas-prototype\\a7784e51-4db3-4c4d-8dbc-13078686e620\\scratchpad\\phase1-out.txt\" 2>&1)",
+      "Shell(npx ts-node src/server.ts)",
+      "Shell(docker:*)",
+      "powershell",
+      "Shell(curl.exe:*)",
+      "Shell(node -e \"const r=require('C:/Users/abdul/AppData/Local/Temp/commandcode/D--University-FYP-implementation-codeatlas-prototype/a7784e51-4db3-4c4d-8dbc-13078686e620/scratchpad/ky-response.json'); const g=r.graph; const t={}; g.nodes.forEach(n=>t[n.type]=(t[n.type]||0)+1); const rt={}; g.relationships.forEach(x=>rt[x.type]=(rt[x.type]||0)+1); console.log('repository', r.repository, 'persisted', r.persisted); console.log('nodes', g.nodes.length, JSON.stringify(t)); console.log('relationships', g.relationships.length, JSON.stringify(rt));\")",
+      "Shell(agent-browser:*)",
+      "Shell(node \"C:\\Users\\abdul\\AppData\\Local\\Temp\\commandcode\\D--University-FYP-implementation-codeatlas-prototype\\a7784e51-4db3-4c4d-8dbc-13078686e620\\scratchpad\\aura-test.js\")",
+      "Shell(node \"C:\\Users\\abdul\\AppData\\Local\\Temp\\commandcode\\D--University-FYP-implementation-codeatlas-prototype\\a7784e51-4db3-4c4d-8dbc-13078686e620\\scratchpad\\neo-test.js\")",
+      "Shell(node -e const r=require('C:/Users/abdul/AppData/Local/Temp/commandcode/D--University-FYP-implementation-codeatlas-prototype/a7784e51-4db3-4c4d-8dbc-13078686e620/scratchpad/persist-response.json'); console.log('repository', r.repository, '| persisted', r.persisted, '| nodes', r.nodeCount, '| rels', r.relationshipCount);)",
+      "Shell(node -e const r=require('C:/Users/abdul/AppData/Local/Temp/commandcode/D--University-FYP-implementation-codeatlas-prototype/a7784e51-4db3-4c4d-8dbc-13078686e620/scratchpad/persist-response2.json'); console.log('upload ->', 'repository', r.repository, '| persisted', r.persisted, '| nodes', r.nodeCount, '| rels', r.relationshipCount);)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

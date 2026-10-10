@@ -1,0 +1,866 @@
+================================================================================
+ CODEATLAS  -  F1 SYSTEM GUIDE
+ AST-Based Interactive Knowledge Graph
+ File-by-file workflow, execution flow, and architecture evolution
+ (Before vs. Now)   -   prepared for supervisor presentation
+================================================================================
+
+CONTENTS
+  1.  What CodeAtlas F1 Does (Scope)
+  2.  How To Run It
+  3.  High-Level Architecture
+  4.  Directory / File Map
+  5.  File-by-File Walkthrough
+        5A. Project root files
+        5B. Backend - configuration, database, models, utilities
+        5C. Backend - the parser package (AST pipeline)
+        5D. Backend - the service layer
+        5E. Backend - controllers, routes, server
+        5F. Backend - test / demo scripts
+        5G. Frontend
+  6.  End-to-End Execution Flow (a single upload, step by step)
+  7.  Graph Data Model (node types, IDs, relationship types)
+  8.  REST API Reference
+  9.  Error Handling & Fault Tolerance
+ 10.  Architecture: BEFORE vs. NOW (what changed and why)
+ 11.  Verification / Evidence
+ 12.  Known Limitations & Future Work (F2+)
+ 13.  Glossary
+
+
+================================================================================
+ 1. WHAT CODEATLAS F1 DOES (SCOPE)
+================================================================================
+
+CodeAtlas turns a JavaScript / TypeScript repository into an interactive
+knowledge graph so a developer can understand an unfamiliar codebase quickly.
+
+The F1 pipeline (the only scope implemented so far) is:
+
+   Repository ZIP
+      -> Repository Scanner      (find source files)
+      -> AST Parser              (Babel)
+      -> Entity Extraction       (nodes)
+      -> Relationship Extraction (edges)
+      -> Graph Builder           (validate + assemble)
+      -> Neo4j                   (persistence)
+      -> REST API                (Express)
+      -> React + D3              (interactive graph)
+
+F1 node types      : Repository, Directory, File, Class, Function, Method
+                     (Variables may exist internally, not shown by default)
+F1 relationship    : CONTAINS, IMPORTS, CALLS, EXTENDS
+F1 input           : a .zip archive of a JS/TS project
+F1 output          : an interactive force-directed graph in the browser, with
+                     zoom / pan / drag / click and a node-details panel.
+
+NOT in F1 (deliberately out of scope for now): LLM/AI explanations, RAG,
+change-impact analysis, technical-debt or vulnerability analysis, auth,
+billing, guided tours, project export, .rar/.7z input, Git URL input.
+
+
+================================================================================
+ 2. HOW TO RUN IT
+================================================================================
+
+Prerequisites
+  - Node.js 18+            (node -v)
+  - Neo4j 5.x running       (Neo4j Desktop instance, or Aura)
+  - Dependencies installed  (npm install inside backend/ and frontend/)
+
+Two terminals are required (there is NO package.json at the project root):
+
+  Terminal 1 - backend (API):
+      cd /d D:\University\FYP\implementation\codeatlas-prototype\backend
+      npm install        (first time only)
+      npm run dev        ->  http://localhost:5000
+
+  Terminal 2 - frontend (dashboard):
+      cd /d D:\University\FYP\implementation\codeatlas-prototype\frontend
+      npm install        (first time only)
+      npm run dev        ->  http://localhost:5173
+
+Then open http://localhost:5173, choose a .zip, click "Analyze repository".
+
+Config file: backend/.env
+      NEO4J_URI=neo4j://127.0.0.1:7687
+      NEO4J_USERNAME=neo4j
+      NEO4J_PASSWORD=codeatlas123
+      NEO4J_DATABASE=neo4j
+      PORT=5000
+
+  IMPORTANT: use 127.0.0.1 (not "localhost"). "localhost" can resolve to the
+  IPv6 address ::1, while Neo4j listens on IPv4 127.0.0.1, which causes a
+  connection-refused error.
+
+Health check:  http://localhost:5000/api/health  ->  {"status":"ok","neo4j":true}
+
+
+================================================================================
+ 3. HIGH-LEVEL ARCHITECTURE
+================================================================================
+
+  BROWSER (React + D3, http://localhost:5173)
+     |
+     |  HTTP (JSON + multipart). Vite dev server proxies "/api" -> :5000
+     v
+  BACKEND (Express 5 + TypeScript, http://localhost:5000)
+     |
+     +-- routes/         -> controllers/        (HTTP layer)
+     |                        |
+     |                        +--> ingestion.service   (ZIP -> files on disk)
+     |                        +--> parser.service      (orchestrates analysis)
+     |                               |
+     |                               +--> analysis.service   (the pipeline)
+     |                               |       |
+     |                               |       +--> repository.service (scan)
+     |                               |       +--> parser/*           (Babel/TS)
+     |                               |
+     |                               +--> graph.service        (Neo4j read/write)
+     |
+     +-- config/env        (loads .env)
+     +-- database/neo4j    (driver)
+
+  NEO4J (bolt://127.0.0.1:7687)  - nodes labeled :Entity:<Type>, edges typed
+
+Design principles:
+  - The BACKEND builds the graph. The FRONTEND only renders what the API
+    returns (the frontend never constructs graph semantics).
+  - Physical filesystem paths are kept separate from the repository-relative
+    paths used in graph IDs. Machine paths are never exposed in the graph.
+  - One bad file must never abort the whole analysis (fault tolerance).
+  - Persistence is best-effort: if Neo4j is down the graph is still returned.
+
+
+================================================================================
+ 4. DIRECTORY / FILE MAP
+================================================================================
+
+codeatlas-prototype/
+  README.md                     project overview + run instructions
+  docker-compose.yml            optional local Neo4j service
+  .gitignore                    ignores node_modules, dist, .env, uploads, ...
+
+  backend/
+    package.json                backend deps + npm scripts
+    tsconfig.json               TypeScript config (includes all of src/)
+    .env                        real secrets/config (never commit)
+    .env.example                template
+    .gitignore
+    uploads/                    temp storage for uploaded ZIPs (runtime)
+    extracted/                  extracted repositories (runtime)
+    src/
+      server.ts                 Express entry point
+      config/env.ts             loads .env, exports typed config
+      database/neo4j.ts         Neo4j driver singleton
+      models/graph.types.ts     shared graph type definitions
+      utils/file.utils.ts       filesystem + ZIP-signature helpers
+      utils/ignore.utils.ts     ignored-directory rules
+      types/unzipper.d.ts       ambient type declaration for "unzipper"
+      parser/
+        ast.parser.ts           Babel parse of a single file
+        entity.extractor.ts     AST -> nodes
+        relationship.extractor.ts  AST -> edges
+        symbol.resolver.ts      TypeScript Compiler API call resolution
+        module-resolver.ts      local import path resolution
+        graph.builder.ts        final assembly, dedupe, validation
+      services/
+        repository.service.ts   file scanner
+        analysis.service.ts     the analysis pipeline orchestrator
+        ingestion.service.ts    ZIP extraction (zip-slip safe)
+        parser.service.ts       analyze + persist (best-effort)
+        graph.service.ts        Neo4j persistence + retrieval
+      controllers/repository.controller.ts  HTTP handlers
+      routes/repository.routes.ts           Express router + multer
+      test-project/            small sample repo used by demo scripts
+      test-*.ts                manual pipeline demo scripts
+
+  frontend/
+    package.json                frontend deps + scripts
+    vite.config.ts              dev server + /api proxy
+    tsconfig.json / tsconfig.node.json
+    tailwind.config.js / postcss.config.js
+    index.html
+    src/
+      main.tsx                  React entry point
+      App.tsx                   top-level layout + state
+      api.ts                    HTTP client for the backend
+      types.ts                  shared graph types (mirror of backend)
+      nodeStyles.ts             node colors + radii per type
+      index.css                 Tailwind + base styles
+      components/
+        UploadPanel.tsx         file picker + buttons
+        GraphView.tsx           D3 force-directed graph
+        DetailsPanel.tsx        selected node details + relationships
+        Legend.tsx              color legend
+
+
+================================================================================
+ 5. FILE-BY-FILE WALKTHROUGH
+================================================================================
+
+--------------------------------------------------------------------------------
+ 5A. PROJECT ROOT FILES
+--------------------------------------------------------------------------------
+
+README.md
+  Human-facing documentation: F1 scope, pipeline, node/relationship types,
+  prerequisites, how to run backend/frontend, the REST endpoints, the graph
+  identity scheme, and the demo scripts. Useful for onboarding / evaluation.
+
+docker-compose.yml
+  Optional convenience to run Neo4j locally in Docker ("docker compose up -d
+  neo4j"). Defines a neo4j:5 service on ports 7474 (HTTP) and 7687 (Bolt),
+  auth neo4j/codeatlas123, with a named volume. Not required if you use
+  Neo4j Desktop or Aura.
+
+.gitignore (root) and backend/.gitignore
+  Prevent committing node_modules/, dist/, build/, .env (SECRETS),
+  backend/uploads/ and backend/extracted/ (runtime artifacts) and *.log.
+  The .env file must never be committed because it contains database
+  credentials.
+
+
+--------------------------------------------------------------------------------
+ 5B. BACKEND - CONFIGURATION, DATABASE, MODELS, UTILITIES
+--------------------------------------------------------------------------------
+
+backend/package.json
+  Dependencies:
+    @babel/parser, @babel/traverse   -> JavaScript/TypeScript AST parsing
+    express, cors, multer            -> HTTP server, CORS, file uploads
+    neo4j-driver                     -> Neo4j Bolt driver
+    unzipper                         -> ZIP extraction
+    dotenv                           -> .env loading
+  Scripts:
+    dev     = ts-node-dev --respawn --transpile-only src/server.ts
+    build   = tsc
+    start   = node dist/server.js
+    analyze = ts-node src/test-analysis.ts
+  (dev-broken script from before: the original only had a placeholder "test"
+   script and no way to start the server.)
+
+backend/tsconfig.json
+  Strict TypeScript, CommonJS output to dist/. "include": ["src"] so ALL
+  source is type-checked (previously only a subset was included, which hid
+  real compile errors). Also sets "ts-node": { "files": true } so ts-node
+  loads ambient .d.ts files (needed for the "unzipper" declaration).
+
+backend/src/config/env.ts
+  Loads environment variables ONCE and exposes a typed "env" object.
+  - Uses dotenv with an explicit path (../../.env) so it works regardless of
+    the current working directory.
+  - Provides defaults for neo4j uri/username/password/database, PORT (5000),
+    uploadsDir and extractedDir (absolute paths).
+  This is the single source of configuration truth.
+
+backend/src/database/neo4j.ts
+  Creates and exports a single Neo4j driver (singleton) plus the database name.
+  - Reads config from env.ts (NOT directly from process.env).
+  - Sets disableLosslessIntegers: true so integer values (e.g. line numbers)
+    are returned as plain JS numbers (clean JSON) instead of Neo4j Integer
+    objects.
+
+backend/src/models/graph.types.ts
+  The shared contract used by the whole backend:
+    EntityType        = Repository | Directory | File | Class | Function |
+                        Method | Variable
+    RelationshipType  = CONTAINS | IMPORTS | CALLS | EXTENDS
+    GraphNode         { id, type, name, filePath, startLine, endLine }
+    GraphRelationship { source, target, type }
+    GraphData         { nodes[], relationships[] }
+  The frontend mirrors these in its own types.ts.
+
+backend/src/utils/ignore.utils.ts
+  Defines IGNORED_DIRECTORIES (node_modules, .git, dist, build, coverage,
+  .next, out, vendor) and isIgnoredDirectory(name). Central place for scan
+  ignore rules (previously hard-coded inside repository.service).
+
+backend/src/utils/file.utils.ts
+  Small, focused filesystem helpers used by ingestion and the controller:
+    ensureDirectory(path)        mkdir -p
+    isPathInside(parent, child)  true only if child is within parent
+                                 (used to reject "zip-slip" archive entries)
+    toPosixPath(value)           backslashes -> forward slashes
+    removeDirectoryIfExists(p)   recursive delete
+    removeFileIfExists(p)        delete one file (cleanup of uploaded ZIPs)
+    isZipArchive(path)           reads the first 2 bytes and checks the ZIP
+                                 magic number "PK" (rejects RAR/7z/bogus)
+
+backend/src/types/unzipper.d.ts
+  The "unzipper" package ships no TypeScript types. This ambient declaration
+  describes the minimal API we use (Open.file(...).files, each entry's path,
+  type and stream()) so the project stays strictly typed.
+
+
+--------------------------------------------------------------------------------
+ 5C. BACKEND - THE PARSER PACKAGE (AST PIPELINE)
+--------------------------------------------------------------------------------
+
+backend/src/parser/ast.parser.ts
+  parseFile(filePath): reads the file and parses it with Babel
+  (@babel/parser) into an AST.
+  - Chooses plugins by file EXTENSION:
+      .ts        -> ["typescript"]
+      .tsx       -> ["typescript","jsx"]
+      .jsx       -> ["jsx"]
+      .js/.other -> []  (plain JS)
+    (The "jsx" plugin is intentionally NOT enabled for .ts so that
+     angle-bracket type assertions still parse.)
+  - sourceType "module", ranges enabled.
+
+backend/src/parser/entity.extractor.ts
+  extractEntities(ast, filePath): walks the AST and emits NODES.
+  - Always emits one "File" node (id file:<relativePath>).
+  - ClassDeclaration   -> Class node   (id class:<path>:<ClassName>)
+  - FunctionDeclaration-> Function node(id function:<path>:<Name>)
+  - ClassMethod        -> Method node  (id method:<path>:<ClassName>:<Name>)
+    The method id is QUALIFIED with its enclosing class name, so two classes
+    in the same file can share a method name without colliding.
+  Every node records type, name, filePath and start/end line.
+
+backend/src/parser/relationship.extractor.ts
+  extractRelationships(ast, context, entities, symbolResolver): walks the AST
+  and emits EDGES. "context" carries three paths:
+      filePath          repository-relative (used for IDs)
+      absoluteFilePath  physical path (used for import resolution)
+      repositoryRoot    repo root (used to make resolved paths relative)
+  Produces:
+    CONTAINS : file -> class, class -> method, file -> function
+    IMPORTS  : file -> resolved local file   (via module-resolver)
+    EXTENDS  : class -> superclass           (best-effort, by name)
+    CALLS    : function/method -> resolved callee  (via symbol-resolver)
+  Helpers:
+    getMethodKey(node)      extracts a method's name (Identifier or string key)
+    findClassEntityId(name) matches a superclass name to a Class entity
+                            (same file first, then anywhere; if not found the
+                             EXTENDS edge is simply omitted)
+  CALLS logic: for each CallExpression it finds the enclosing function/method
+  (the "caller"), then asks the symbol resolver to resolve the call target at
+  the call's start offset; the edge is only emitted if the target node exists.
+
+backend/src/parser/module-resolver.ts
+  resolveModule(currentAbsoluteFilePath, importPath, repositoryRoot): maps a
+  local import to a repository-relative path, or null.
+  - Only relative imports ("./", "../") are resolved; packages are ignored.
+  - Tries the exact path plus .ts/.tsx/.js/.jsx and /index.* variants.
+  - Handles ESM-style ".js" imports that actually point at ".ts" sources
+    (e.g. import "./constants.js" -> constants.ts), which is common in modern
+    TypeScript.
+
+backend/src/parser/symbol.resolver.ts
+  createSymbolResolver(repositoryRoot, absoluteSourceFiles): builds a
+  TypeScript PROGRAM (ts.createProgram) over all source files and returns a
+  resolver exposing resolveCallFromLocation(filePath, position).
+  - getSourceFile(path)   finds the matching ts.SourceFile (case-insensitive,
+                          normalized separators)
+  - findCallExpression()  finds the CallExpression at an offset; it keeps
+                          descending so the INNERMOST call wins (this
+                          correctly resolves nested calls like outer(inner()))
+  - resolveCallFromLocation(): gets the symbol at the call's callee, follows
+                          import aliases (getAliasedSymbol), then converts the
+                          declaration into a CodeAtlas id.
+  - getCodeAtlasId():     maps a resolved declaration to
+                            function:<relativePath>:<Name>
+                            method:<relativePath>:<ClassName>:<Name>
+                          using paths relative to the repository root.
+
+backend/src/parser/graph.builder.ts
+  buildGraph(entities, relationships, repositoryName): the final assembly and
+  validation step. It:
+  - Creates the Repository node (id repository:<name>).
+  - Deduplicates nodes by id (Map).
+  - Derives Directory nodes from each File node's path and adds CONTAINS
+    edges repository -> top-level dir/file, dir -> child dir/file.
+  - Filters out relationships whose source or target node does not exist
+    (dangling edges) and self-loops.
+  - Deduplicates relationships by source|type|target.
+  Returns a clean GraphData { nodes, relationships }.
+
+
+--------------------------------------------------------------------------------
+ 5D. BACKEND - THE SERVICE LAYER
+--------------------------------------------------------------------------------
+
+backend/src/services/repository.service.ts
+  findSourceFiles(repositoryPath): recursively scans a directory and returns
+  the list of source files (extensions .ts .tsx .js .jsx) as repository-
+  relative paths with forward slashes. Skips ignored directories via
+  ignore.utils. This is the "Repository Scanner".
+
+backend/src/services/analysis.service.ts
+  analyzeRepository(repositoryPath, repositoryName?): THE PIPELINE
+  ORCHESTRATOR. Phases:
+    PHASE 1/2  For each source file: parseFile(absolutePath) then
+               extractEntities(ast, relativePath). Files are tracked with a
+               RelationshipContext so physical and relative paths stay
+               separate. A file that fails to parse is logged and SKIPPED
+               (one bad file never kills the run).
+    PHASE 2    Build the TypeScript program over all parsed files via
+               createSymbolResolver(repositoryRoot, absoluteFiles).
+    PHASE 3    For each parsed file: extractRelationships(ast, context,
+               entities, symbolResolver). Per-file errors are caught + logged.
+    PHASE 4    buildGraph(entities, relationships, repositoryName).
+  Returns GraphData. The repository name is used for the Repository node and
+  the persistence scope (defaults to the folder name if not provided).
+
+backend/src/services/ingestion.service.ts
+  ZIP ingestion ("Repository Scanner" input stage):
+    sanitizeName(name)        turns the upload name into a safe folder name
+    resolveRepositoryRoot(dir) if the archive has a single top-level folder,
+                              descend into it (the common "project folder"
+                              layout)
+    extractZip(zipPath, name) opens the ZIP with unzipper and writes each
+                              entry under extracted/<name>-<timestamp>/. Each
+                              entry is validated with isPathInside() so a
+                              malicious "../../" entry (zip-slip) is skipped.
+  Returns { repositoryName, repositoryPath }.
+
+backend/src/services/parser.service.ts
+  analyzeAndStore(repositoryPath, repositoryName):
+    - runs analyzeRepository(...)
+    - tries saveGraph(graph, repositoryName) to persist to Neo4j
+    - if persistence fails (Neo4j down) it logs a warning and continues,
+      returning { graph, persisted: false }
+  Returns { graph, persisted }. This is what makes the demo resilient: the
+  graph is always returned even without a database.
+
+backend/src/services/graph.service.ts
+  The Neo4j persistence + retrieval layer.
+    ENTITY_LABELS / RELATIONSHIP_TYPES : allow-lists. Only known node types and
+        relationship types are written, so graph data can never inject Cypher
+        through a label.
+    entityLabels(type)      -> ":Entity:<Type>" (or ":Entity")
+    relationshipType(type)  -> the relationship type name (or "RELATIONSHIP")
+    saveGraph(graph, name)  - deletes only THIS repository's nodes
+                              (MATCH (n:Entity {repository:$repository}) DETACH
+                              DELETE n), then CREATes each node with labels
+                              :Entity:<Type> plus properties (id, type, name,
+                              filePath, startLine, endLine, repository) and
+                              each relationship. Re-analysing the same
+                              repository is idempotent and does NOT touch
+                              other repositories.
+    fetchGraph(repository?) reads nodes + relationships back out (optionally
+                            scoped to one repository).
+    listRepositories()      returns the names of repositories with a graph.
+    verifyConnection()      used by the health endpoint; returns true/false.
+
+
+--------------------------------------------------------------------------------
+ 5E. BACKEND - CONTROLLERS, ROUTES, SERVER
+--------------------------------------------------------------------------------
+
+backend/src/controllers/repository.controller.ts
+  The HTTP handlers (thin: validation + service calls only):
+    health()                 -> { status, neo4j }
+    analyzeRepositoryUpload()-> validates the upload (name ends in .zip AND
+                                the ZIP magic bytes are present, else 400 with
+                                a clear message), extracts, analyzes, persists,
+                                responds 201 { repository, persisted,
+                                nodeCount, relationshipCount, graph }, and
+                                always deletes the temp upload afterwards.
+    getGraph()               -> returns the stored graph, optionally filtered
+                                by ?repository=<name>
+    getRepositories()        -> { repositories: [...] }
+
+backend/src/routes/repository.routes.ts
+  Defines the router and the multer upload middleware (disk storage into
+  backend/uploads, 50 MB limit, field name "file"). Routes:
+    GET  /health
+    GET  /repositories
+    GET  /graph
+    POST /repositories/analyze   (multipart "file")
+
+backend/src/server.ts
+  The Express application entry point:
+    - enable CORS and JSON body parsing
+    - mount the router under /api
+    - a 404 handler (JSON)
+    - a central error handler (logs and returns JSON 500)
+    - listens on env.port (default 5000)
+
+
+--------------------------------------------------------------------------------
+ 5F. BACKEND - TEST / DEMO SCRIPTS
+--------------------------------------------------------------------------------
+
+src/test-project/sample.ts, userService.ts
+  A tiny artificial sample repo (a controller class, functions, and a service
+  module that is imported) used to demonstrate the pipeline deterministically.
+
+src/test-analysis.ts       runs the full analysis on src/test-project and
+                           prints the resulting graph as JSON.
+src/test-parser.ts         parses one file, extracts entities + relationships,
+                           and builds a graph (single-file demo).
+src/test-repository.ts     prints the list of source files the scanner finds.
+src/test-resolver.ts       resolves a single import path to a repo-relative
+                           path.
+These scripts are how the pipeline can be exercised without the HTTP server.
+
+
+--------------------------------------------------------------------------------
+ 5G. FRONTEND
+--------------------------------------------------------------------------------
+
+frontend/package.json
+  React 18 + D3 v7 + Tailwind CSS v3, built with Vite 5 + TypeScript.
+  Scripts: dev (vite), build (tsc && vite build), preview.
+
+frontend/vite.config.ts
+  Vite dev server on port 5173 with a proxy: any request to "/api" is
+  forwarded to http://localhost:5000. This is why the frontend can call the
+  backend using relative URLs (/api/...) without CORS issues in dev.
+
+frontend/index.html
+  Hosts the #root element and loads /src/main.tsx.
+
+frontend/src/main.tsx
+  React entry: mounts <App/> into #root inside React.StrictMode.
+
+frontend/src/App.tsx
+  The layout and state owner:
+    - three-pane layout: left = controls, centre = graph, right = details
+    - state: graph, selected node, repository name, status text, busy flag
+    - handleAnalyze(file): POSTs the ZIP, stores the returned graph
+    - handleLoad(): GETs the stored graph from Neo4j
+    - handleSelect(node): selects/deselects a node
+  Renders <UploadPanel/>, <GraphView/> (when a graph exists) and
+  <DetailsPanel/>.
+
+frontend/src/api.ts
+  The HTTP client:
+    analyzeArchive(file)  -> POST /api/repositories/analyze (FormData "file")
+                             returns { repository, persisted, ..., graph };
+                             on error reads the JSON "error" message
+    loadGraph()           -> GET /api/graph
+    listRepositories()    -> GET /api/repositories
+
+frontend/src/types.ts
+  Frontend mirror of the backend graph types (GraphNode, GraphRelationship,
+  GraphData, EntityType, RelationshipType).
+
+frontend/src/nodeStyles.ts
+  TYPE_COLORS and TYPE_RADIUS maps - one colour and radius per node type
+  (Repository purple, Directory teal, File blue, Class orange, Function green,
+  Method pink, Variable grey).
+
+frontend/src/components/UploadPanel.tsx
+  File input (accept=".zip") + a hint that only ZIP is supported + two
+  buttons: "Analyze repository" (disabled until a file is chosen / while busy)
+  and "Load stored graph".
+
+frontend/src/components/GraphView.tsx
+  The D3 visualisation. On every new graph it:
+    - clears the SVG and appends a zoomable container
+    - defines an arrow marker for directed edges
+    - binds nodes and links as <g>/<circle>/<text> and <line>
+    - runs a force simulation (forceLink distance 90 strength 0.2;
+      forceManyBody -280; forceCenter; forceCollide radius 24)
+    - updates positions on "tick"
+    - enables DRAG (d3.drag), CLICK-to-select (with stopPropagation) and
+      background-click to deselect
+    - "fit-to-view" on the simulation "end" event: computes the graph's
+      bounding box and sets a zoom transform so the whole graph is centred
+    - label strategy: all labels when <= 80 nodes, otherwise only Repository,
+      Directory, Class and Function labels (keeps large graphs readable);
+      labels have a white halo (paint-order: stroke)
+  A second effect highlights the selected node and its direct neighbours
+  (dimming the rest) whenever the selection changes.
+
+frontend/src/components/DetailsPanel.tsx
+  Shows the selected node's name, id, type, file path, start line and end line,
+  plus OUTGOING and INCOMING relationships (each clickable, so you can walk the
+  graph). Shows a placeholder until a node is selected.
+
+frontend/src/components/Legend.tsx
+  The colour legend in the header.
+
+
+================================================================================
+ 6. END-TO-END EXECUTION FLOW (one upload, step by step)
+================================================================================
+
+  1. User picks a .zip in UploadPanel and clicks "Analyze repository".
+  2. api.analyzeArchive(file) sends POST /api/repositories/analyze as
+     multipart/form-data (field "file").
+  3. Vite dev server proxies /api/* to the backend on port 5000.
+  4. server.ts (Express) -> cors, json -> routes/repository.routes.ts.
+     The multer middleware streams the upload into backend/uploads/.
+  5. controller.analyzeRepositoryUpload():
+       - rejects non-ZIP (extension and "PK" magic bytes) with HTTP 400;
+       - calls ingestion.extractZip() -> files land under
+         backend/extracted/<name>-<timestamp>/ (zip-slip entries skipped),
+         and the repository root is resolved.
+  6. parser.service.analyzeAndStore(repositoryPath, repositoryName):
+       a. analysis.service.analyzeRepository():
+            - repository.service.findSourceFiles() lists .ts/.tsx/.js/.jsx
+            - for each file: ast.parser.parseFile() (Babel) ->
+              entity.extractor.extractEntities()  [File/Class/Function/Method]
+            - symbol.resolver.createSymbolResolver() builds the TS program
+            - relationship.extractor.extractRelationships() per file
+              [CONTAINS, IMPORTS via module-resolver, EXTENDS, CALLS via the
+               TS symbol resolver]
+            - graph.builder.buildGraph() [add Repository+Directory nodes,
+              dedupe nodes, drop dangling/duplicate edges]
+       b. graph.service.saveGraph(graph, name): writes to Neo4j
+          (scoped delete for this repository, then nodes and relationships).
+          If Neo4j is unreachable this is caught; persisted=false.
+  7. Controller responds 201 with { repository, persisted, nodeCount,
+     relationshipCount, graph } and deletes the temp upload file.
+  8. App.tsx stores the graph and shows the status line; GraphView runs the
+     force simulation and renders the interactive graph; clicking a node
+     populates DetailsPanel.
+
+  Reload path:
+     "Load stored graph" -> api.loadGraph() -> GET /api/graph ->
+     controller.getGraph() -> graph.service.fetchGraph() -> Neo4j ->
+     the same graph is rendered again.
+
+
+================================================================================
+ 7. GRAPH DATA MODEL
+================================================================================
+
+Node identity (globally unique WITHIN one analysed repository, and derived
+from REPOSITORY-RELATIVE paths so machine paths never leak):
+
+  Repository   repository:<name>
+  Directory    directory:<relativeDirPath>            e.g. directory:core
+  File         file:<relativeFilePath>               e.g. file:core/Ky.ts
+  Class        class:<relativeFilePath>:<ClassName>
+  Function     function:<relativeFilePath>:<Name>
+  Method       method:<relativeFilePath>:<ClassName>:<Name>
+
+  Example (from a real repo):
+      function:utils/normalize.ts:normalizeRequest
+      method:core/Ky.ts:Ky:constructor
+
+Relationship types:
+  CONTAINS : structural ownership (repository/dir/file containing children)
+  IMPORTS  : a file imports a local file
+  CALLS    : a function/method calls another function/method
+  EXTENDS  : a class extends another class
+
+Each node also carries: name, filePath, startLine, endLine.
+In Neo4j every node is labeled :Entity and also with its specific type
+(e.g. :Entity:Function), and stores a "repository" property used to scope
+queries and deletions.
+
+
+================================================================================
+ 8. REST API REFERENCE
+================================================================================
+
+  GET  /api/health
+       -> { "status": "ok", "neo4j": true|false }
+
+  POST /api/repositories/analyze      (multipart/form-data, field "file")
+       -> 201 { repository, persisted, nodeCount, relationshipCount, graph }
+       -> 400 { error } for a missing / non-ZIP / unreadable archive
+
+  GET  /api/graph                     -> { nodes: [...], relationships: [...] }
+  GET  /api/graph?repository=<name>   -> scoped to one repository
+  GET  /api/repositories              -> { repositories: [ "name", ... ] }
+
+  graph = { "nodes": [ {id,type,name,filePath,startLine,endLine}, ... ],
+            "relationships": [ {source,target,type}, ... ] }
+
+
+================================================================================
+ 9. ERROR HANDLING & FAULT TOLERANCE
+================================================================================
+
+  - A single file that fails to PARSE is logged and skipped; the rest of the
+    repository is still analysed (analysis.service per-file try/catch).
+  - Relationship extraction for a file is wrapped in its own try/catch.
+  - Unresolved imports and unresolved calls are simply omitted (never crash).
+  - Duplicate node ids and duplicate/dangling edges are removed in
+    graph.builder.
+  - Non-ZIP uploads are rejected up front with a clear 400 message
+    (previously produced a cryptic "FILE_ENDED" from the ZIP parser).
+  - If Neo4j is unavailable, analyze still succeeds and returns the graph with
+    persisted=false; /api/health reports neo4j:false.
+  - Central Express error handler returns JSON for unexpected errors.
+
+
+================================================================================
+10. ARCHITECTURE: BEFORE vs. NOW  (what changed and why)
+================================================================================
+
+10.1 ORIGINAL STATE (as received)
+  The project was a partial prototype with a working "analysis core" and a lot
+  of empty scaffolding. Specifically:
+
+  WORKING (but with defects):
+    - repository.service (file scanner)
+    - ast.parser (Babel parse, TypeScript plugin only)
+    - entity.extractor (File/Class/Function/Method nodes)
+    - relationship.extractor (CONTAINS/IMPORTS/CALLS)
+    - symbol.resolver (TS compiler API)
+    - graph.builder (only filtered dangling edges)
+    - analysis.service (orchestrator, no per-file error handling)
+    - database/neo4j + graph.service (persist by wiping the whole DB)
+    - test-*.ts demo scripts, test-project sample
+
+  EMPTY (no logic):
+    - server.ts, config/env.ts, controllers/repository.controller.ts,
+      routes/repository.routes.ts, services/parser.service.ts,
+      utils/file.utils.ts, utils/ignore.utils.ts
+    - frontend/ was an EMPTY directory
+    - no README, no docker-compose, no root .gitignore
+
+  ORIGINAL DEFECTS FOUND:
+    D1. test-parser.ts compiled with an error: extractRelationships was called
+        with 3 arguments instead of 4 (missing the symbol resolver).
+    D2. JSX could not be parsed: ast.parser always used only the "typescript"
+        plugin, so .tsx/.jsx files threw "Unexpected token".
+    D3. Nested calls resolved to the OUTER call: symbol.resolver returned the
+        first (outermost) CallExpression containing the offset, so
+        outer(inner()) produced both edge targets = outer.
+    D4. Method ids were NOT class-qualified: method:<file>:<name>, so two
+        classes with the same method name produced duplicate node ids.
+    D5. No Repository or Directory nodes existed in the graph.
+    D6. No EXTENDS relationships.
+    D7. graph.builder did not deduplicate nodes/edges.
+    D8. Node paths were effectively cwd-relative and machine-specific rather
+        than truly repository-relative; physical and logical paths were mixed.
+    D9. graph.service wiped the ENTIRE database
+        (MATCH (n) DETACH DELETE n), used CREATE (not idempotent), interpolated
+        node.type into the Cypher label, and had no read-retrieval functions.
+    D10. No dotenv loading; neo4j.ts read process.env directly at import.
+    D11. No HTTP layer at all (no server/routes/controller), no upload, no
+         ingestion.
+    D12. No frontend/visualisation.
+    D13. tsconfig only type-checked a subset (hid D1 from `tsc`).
+    D14. .gitignore was empty, so .env (credentials) was not protected.
+
+10.2 WHAT WE CHANGED (and the reason)
+
+  PARSING / ANALYSIS CORRECTNESS
+    - ast.parser: choose Babel plugins by extension (ts/tsx/jsx).        [D2]
+    - entity.extractor: qualify method ids with the class name.          [D4]
+    - symbol.resolver: make findCallExpression pick the innermost call.  [D3]
+    - symbol.resolver: qualify method ids with the class name (matches
+      entity.extractor).                                                 [D4]
+    - relationship.extractor: added EXTENDS, class-qualified method ids, and
+      a RelationshipContext that separates physical vs. relative paths.  [D4,D6,D8]
+    - module-resolver: resolve to repository-relative paths, accept a
+      repositoryRoot, and map ESM ".js" imports to ".ts" sources.       [D8]
+    - graph.builder: derive Repository + Directory nodes, add CONTAINS edges,
+      deduplicate nodes, and drop dangling/duplicate/self edges.     [D5,D7]
+    - analysis.service: work in repository-relative paths, keep physical paths
+      separate, accept an explicit repository name, and add per-file error
+      tolerance.                                                     [D8]
+    - repository.service: use the shared ignore rules.
+
+  PERSISTENCE
+    - graph.service rewritten: allow-listed labels/relationship types (no
+      Cypher injection), scoped delete per repository (idempotent re-analysis,
+      other repos untouched), and added fetchGraph / listRepositories /
+      verifyConnection.                                                  [D9]
+    - database/neo4j: read config from env.ts and use
+      disableLosslessIntegers for clean numbers.                         [D10]
+    - config/env: load .env once, regardless of cwd, with typed access.    [D10]
+
+  HTTP + INGESTION (the whole F1 "service" layer, previously missing)
+    - routes + controller + server: Express API (health, analyze, graph,
+      repositories).                                                     [D11]
+    - ingestion.service: safe ZIP extraction with zip-slip protection, plus
+      single-top-folder root detection.                                  [D11]
+    - parser.service: orchestrate analyze + persist (best-effort).        [D11]
+    - file.utils: filesystem helpers incl. isZipArchive to reject non-ZIP. [D11]
+    - multer upload handling (temp storage, 50 MB limit).                 [D11]
+
+  FRONTEND (previously empty)
+    - Built the whole dashboard: Vite + React + TypeScript + Tailwind + D3
+      force-directed graph with zoom/pan/drag/click, neighbour highlighting,
+      auto fit-to-view, a node-details panel and a legend.              [D12]
+
+  PROJECT HYGIENE
+    - tsconfig: include all of src/ so type errors surface.              [D13]
+    - README.md, docker-compose.yml, .env.example, and .gitignore files
+      (protect .env).                                                    [D14]
+    - package.json scripts (dev/build/start/analyze).                    [D11]
+
+  BUG FIXES
+    - test-parser.ts missing argument fixed.                              [D1]
+    - (D2) and (D3) fixed as above.
+
+10.3 NET EFFECT
+  Before: a partial, single-run analysis core that could print a graph, with a
+  broken demo script, no server, no upload, no frontend, and a destructive
+  persistence step.
+
+  Now: a complete end-to-end F1 application -
+      upload a ZIP in the browser -> scan -> parse -> extract nodes+edges ->
+      validate -> store in Neo4j -> serve via REST -> render an interactive
+      graph, with node details and relationship navigation, resilient to bad
+      files and an unavailable database.
+
+
+================================================================================
+11. VERIFICATION / EVIDENCE
+================================================================================
+
+  - Backend type-checks clean (npx tsc --noEmit).
+  - A REAL repository (sindresorhus/ky) was analysed successfully end-to-end
+    through the HTTP API:
+        Full repo (87 files) : 148 nodes / 298 relationships
+            (Repository 1, Directory 8, File 87, Class 13, Function 23,
+             Method 16; CONTAINS 145, IMPORTS 139, CALLS 8, EXTENDS 6)
+        Subset (source/core+errors+utils): 59 nodes / 111 relationships
+  - Persistence verified live against Neo4j:
+        POST /api/repositories/analyze -> persisted:true, 59 nodes / 111 rels
+        GET  /api/graph?repository=... -> the same 59/111 read back
+        GET  /api/repositories         -> ["<name>"]
+  - Frontend verified in a real browser (headless Chrome):
+        graph renders, nodes are colour-coded, clicking a node shows its
+        details and its incoming/outgoing relationships, and "Load stored
+        graph" re-loads the graph from Neo4j.
+
+
+================================================================================
+12. KNOWN LIMITATIONS & FUTURE WORK (F2+)
+================================================================================
+
+  - Input formats: ZIP only (no RAR/7z, no Git URL yet).
+  - Languages: JS/TS only (Babel + TypeScript).
+  - Symbol resolution is best-effort: dynamic imports, re-exports, aliases,
+    overloaded/ambiguous names and external packages may be omitted (by
+    design - F1 prioritises a working graph over perfect accuracy).
+  - EXTENDS is matched by class NAME (same file first), so a same-named class
+    elsewhere could theoretically be chosen.
+  - CALLS inside arrow functions / object methods are not attributed to a
+    named caller.
+  - No authentication, no multi-user isolation (repository scoping exists but
+    there is no user model).
+  - The graph is re-analysed in full each time (no incremental analysis).
+  - Large graphs may need level-of-detail / clustering for readability
+    (currently labels are thinned above 80 nodes).
+
+  Intended later features (explicitly NOT in F1): LLM/AI explanations, RAG,
+  guided tours, change-impact analysis, technical-debt and vulnerability
+  analysis, project export, billing/auth, Git-URL ingestion, and improved
+  semantic precision.
+
+
+================================================================================
+13. GLOSSARY
+================================================================================
+
+  AST          Abstract Syntax Tree - the parsed structure of source code.
+  Babel        Library used to parse JS/TS into an AST.
+  Entity / Node   A code element (Repository/Directory/File/Class/Function/
+                  Method) represented as a graph node.
+  Relationship / Edge  A typed connection between two nodes
+                  (CONTAINS/IMPORTS/CALLS/EXTENDS).
+  Cypher       Neo4j's query language.
+  Bolt         Neo4j's binary protocol (port 7687).
+  zip-slip     A malicious archive path ("../") that escapes the target
+               directory; rejected via isPathInside().
+  Repository-relative path  A path relative to the analysed project's root
+               (used in graph IDs). Distinct from the physical filesystem path.
+
+================================================================================
+ END OF DOCUMENT
+================================================================================

@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+
+# Secrets
+.env
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Generated during ingestion / analysis
+backend/uploads/
+backend/extracted/
+
+# Logs
+*.log
+
+# Local demo recordings / media
+*.mp4
+TestRun/
