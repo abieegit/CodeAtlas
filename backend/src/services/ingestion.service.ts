@@ -13,6 +13,7 @@ import {
 export interface ExtractedRepository {
     repositoryName: string;
     repositoryPath: string;
+    extractionDir: string;
 }
 
 function sanitizeName(
@@ -105,6 +106,7 @@ export async function extractZip(
 
     return {
         repositoryName,
-        repositoryPath: resolveRepositoryRoot(destination)
+        repositoryPath: resolveRepositoryRoot(destination),
+        extractionDir: destination
     };
 }

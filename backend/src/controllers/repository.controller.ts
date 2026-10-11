@@ -7,7 +7,8 @@ import {
 } from "express";
 
 import {
-    extractZip
+    extractZip,
+    ExtractedRepository
 } from "../services/ingestion.service";
 
 import {
@@ -22,8 +23,13 @@ import {
 
 import {
     isZipArchive,
+    removeDirectoryIfExists,
     removeFileIfExists
 } from "../utils/file.utils";
+
+import {
+    env
+} from "../config/env";
 
 export async function health(
     _request: Request,
@@ -57,6 +63,8 @@ export async function analyzeRepositoryUpload(
 
     const uploadedPath = request.file.path;
 
+    let extracted: ExtractedRepository | undefined;
+
     try {
 
         const isZipName =
@@ -70,8 +78,6 @@ export async function analyzeRepositoryUpload(
             });
             return;
         }
-
-        let extracted;
 
         try {
 
@@ -120,6 +126,10 @@ export async function analyzeRepositoryUpload(
     } finally {
 
         removeFileIfExists(uploadedPath);
+
+        if (extracted && !env.keepExtracted) {
+            removeDirectoryIfExists(extracted.extractionDir);
+        }
     }
 }
 

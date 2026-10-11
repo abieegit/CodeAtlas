@@ -75,6 +75,19 @@ Evidence is written as relationship properties in Neo4j and rebuilt by `fetchGra
 
 ## Relevance & scope
 
-See the "Relevance-based scope" section (added with the relevance/visualisation step): scanned
-files receive a `category` and an `inDefaultScope` flag; filtering is a **visualisation** concern
-and never deletes data from Neo4j.
+Scanning and parsing are unchanged (all supported files minus ignored directories). Relevance is
+applied as **properties** on the assembled graph — never by deleting data:
+
+- Every `File` node gets a `category`: `source | test | config | fixture | generated |
+  declaration`, decided by combined path **and** filename signals (`utils/classify.utils.ts`),
+  not by folder names alone.
+- Every node gets `inDefaultScope`. A file is in scope when it is `source` **or** it is imported
+  (directly or transitively) by a source file — so a relevant module outside the main source
+  directory is kept. A Directory is in scope when it contains an in-scope file; the Repository is
+  in scope when any file is.
+- The persisted graph (Neo4j) and the REST API always contain **all** files; the frontend's
+  "Application ↔ Full" scope and the other filters only change what is **drawn**.
+
+**Excluding during analysis** (ignored directories, unsupported extensions) means a file is absent
+from the graph entirely. **Hiding in the UI** means the file is still in Neo4j and the API, just
+not drawn. Filters are reversible and never delete graph data.

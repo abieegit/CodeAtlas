@@ -25,6 +25,8 @@ erDiagram
         string filePath
         int startLine
         int endLine
+        string category "source|test|config|fixture|generated|declaration"
+        boolean inDefaultScope
     }
     CLASS {
         string id PK "class:path:Name"

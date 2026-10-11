@@ -114,3 +114,8 @@ The prototype is covered by an automated test suite and three quality gates:
 - **Edge provenance** — every relationship records how it was found (`resolution` =
   `derived` | `resolved` | `name-match`, plus `filePath` / `line`), persisted as Neo4j
   relationship properties.
+- **Relevance scope** — `classify.utils` + `scope.service` annotate every node with a `category`
+  (File nodes) and `inDefaultScope` flag; the frontend filters are reversible and never delete
+  graph data.
+- **Dark UI** — the interface uses a near-black navy theme with a restrained cyan accent and a
+  selection-only glow.

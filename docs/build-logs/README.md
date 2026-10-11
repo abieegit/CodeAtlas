@@ -38,7 +38,7 @@ Each build log must contain, in order:
 | Build | Name | File | Status | Date |
 | --- | --- | --- | --- | --- |
 | 01 | prototype-test01 | [build-01-prototype-test01.md](./build-01-prototype-test01.md) | Closed | 2026-10-09 |
-| 02 | prototype-test02 | [build-02-prototype-test02.md](./build-02-prototype-test02.md) | Open | 2026-10-11 |
+| 02 | kg-relevance-ui | [build-02-kg-relevance-ui.md](./build-02-kg-relevance-ui.md) | Open | 2026-10-11 |
 
 ## Related documentation
 

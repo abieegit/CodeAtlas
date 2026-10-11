@@ -24,5 +24,6 @@ export const env = {
     ),
     extractedDir: path.resolve(
         process.env.EXTRACTED_DIR ?? "extracted"
-    )
+    ),
+    keepExtracted: process.env.KEEP_EXTRACTED === "true"
 };

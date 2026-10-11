@@ -69,6 +69,14 @@ classDiagram
         <<module>>
         +buildGraph()
     }
+    class ScopeService {
+        <<module>>
+        +annotateScope()
+    }
+    class ClassifyUtils {
+        <<module>>
+        +classifyFile()
+    }
     class Env {
         <<module>>
         +port
@@ -89,6 +97,17 @@ classDiagram
         +string filePath
         +number startLine
         +number endLine
+        +FileCategory category
+        +boolean inDefaultScope
+    }
+    class FileCategory {
+        <<enumeration>>
+        source
+        test
+        config
+        fixture
+        generated
+        declaration
     }
     class GraphRelationship {
         +string source
@@ -165,6 +184,9 @@ classDiagram
     AnalysisService --> RelationshipExtractor
     AnalysisService --> SymbolResolver
     AnalysisService --> GraphBuilder
+    AnalysisService --> ScopeService
+    ScopeService --> ClassifyUtils
+    GraphNode --> FileCategory
     RelationshipExtractor --> ModuleResolver
     RelationshipExtractor --> SymbolResolver
     RelationshipExtractor --> RelationshipContext

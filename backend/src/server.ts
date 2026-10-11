@@ -7,7 +7,23 @@ import express, {
 
 import { env } from "./config/env";
 
+import {
+    ensureDirectory,
+    removeDirectoryIfExists
+} from "./utils/file.utils";
+
 import repositoryRoutes from "./routes/repository.routes";
+
+/*
+ * Best-effort startup hygiene: clear extraction directories left behind by
+ * previous runs unless the operator opted out with KEEP_EXTRACTED=true.
+ * (Uploaded archives live in uploadsDir, not here, so nothing pending is
+ * removed.)
+ */
+if (!env.keepExtracted) {
+    removeDirectoryIfExists(env.extractedDir);
+    ensureDirectory(env.extractedDir);
+}
 
 export const app = express();
 

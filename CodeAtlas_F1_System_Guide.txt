@@ -158,6 +158,7 @@ codeatlas-prototype/
       models/graph.types.ts     shared graph type definitions
       utils/file.utils.ts       filesystem + ZIP-signature helpers
       utils/ignore.utils.ts     ignored-directory rules
+      utils/classify.utils.ts   file category (source/test/config/fixture/...)
       types/unzipper.d.ts       ambient type declaration for "unzipper"
       parser/
         ast.parser.ts           Babel parse of a single file
@@ -169,6 +170,7 @@ codeatlas-prototype/
       services/
         repository.service.ts   file scanner
         analysis.service.ts     the analysis pipeline orchestrator
+        scope.service.ts        relevance scope (category + inDefaultScope)
         ingestion.service.ts    ZIP extraction (zip-slip safe)
         parser.service.ts       analyze + persist (best-effort)
         graph.service.ts        Neo4j persistence + retrieval
@@ -287,10 +289,13 @@ backend/src/models/graph.types.ts
     EntityType        = Repository | Directory | File | Class | Function |
                         Method | Variable
     RelationshipType  = CONTAINS | IMPORTS | CALLS | EXTENDS
-    GraphNode         { id, type, name, filePath, startLine, endLine }
+    GraphNode         { id, type, name, filePath, startLine, endLine,
+                        category?, inDefaultScope? }
     GraphRelationship { source, target, type, evidence? }
     RelationshipEvidence { filePath?, line?, resolution }
     ResolutionMethod  = derived | resolved | name-match
+    FileCategory      = source | test | config | fixture | generated |
+                        declaration
     GraphData         { nodes[], relationships[] }
   "evidence" records HOW an edge was found (provenance): "derived" for
   structural ownership computed from paths, "resolved" for a concrete target
@@ -442,6 +447,20 @@ backend/src/services/analysis.service.ts
   Returns GraphData. The repository name is used for the Repository node and
   the persistence scope (defaults to the folder name if not provided).
 
+backend/src/services/scope.service.ts
+  annotateScope(graph): relevance pass run after buildGraph. It sets
+  File.category (via classify.utils) and inDefaultScope on every node. A file
+  is in scope when it is "source" OR is imported (directly/transitively) by a
+  source file (reachability keeps a relevant module outside the main source
+  directory). Directories inherit scope from their in-scope files; the
+  Repository is in scope when any file is. This is a VISUALISATION concern -
+  no node or relationship is ever removed.
+
+backend/src/utils/classify.utils.ts
+  classifyFile(relativePath, fileName) -> FileCategory (source/test/config/
+  fixture/generated/declaration), using combined path-segment AND filename
+  signals rather than folder names alone.
+
 backend/src/services/ingestion.service.ts
   ZIP ingestion ("Repository Scanner" input stage):
     sanitizeName(name)        turns the upload name into a safe folder name
@@ -498,8 +517,10 @@ backend/src/controllers/repository.controller.ts
                                 the ZIP magic bytes are present, else 400 with
                                 a clear message), extracts, analyzes, persists,
                                 responds 201 { repository, persisted,
-                                nodeCount, relationshipCount, graph }, and
-                                always deletes the temp upload afterwards.
+                                nodeCount, relationshipCount, categoryCounts,
+                                graph }, and afterwards deletes the temp
+                                upload AND the extraction directory (unless
+                                KEEP_EXTRACTED=true).
     getGraph()               -> returns the stored graph, optionally filtered
                                 by ?repository=<name>
     getRepositories()        -> { repositories: [...] }
@@ -642,6 +663,22 @@ frontend/src/components/DetailsPanel.tsx
 
 frontend/src/components/Legend.tsx
   The colour legend in the header.
+
+frontend/src/graphFilters.ts
+  Pure, reversible visualisation filtering: scope (Application <-> Full),
+  node type, relationship type, directory, and focus-selected-plus-neighbours.
+  Returns a new graph; never mutates or deletes.
+
+frontend/src/components/FilterPanel.tsx
+  Controls for the filters above (scope toggle, node/relationship checkboxes,
+  directory select, focus button).
+
+frontend/vitest.config.ts + src/test/setup.ts
+  Frontend test setup (Vitest + jsdom + Testing Library). Tests cover
+  graphFilters, DetailsPanel, UploadPanel and FilterPanel.
+
+Dark theme: tailwind.config.js defines base/panel/edge/accent tokens and
+src/index.css sets the near-black navy base; components use them.
 
 
 ================================================================================
@@ -872,20 +909,30 @@ queries and deletions.
       graph, with node details and relationship navigation, resilient to bad
       files and an unavailable database.
 
-10.4 BUILD 02 DELTA (tests + provenance)   [architecture unchanged]
-  Build 02 hardens the prototype without restructuring it:
-    - Automated tests introduced (Vitest + Supertest): API smoke tests, a
-      fixture-driven pipeline suite (8 fixtures) and graph-builder unit tests;
-      new package.json scripts (test, test:watch, typecheck) and a build-only
-      tsconfig (tsconfig.build.json) that keeps dist/ free of tests.
-    - server.ts now EXPORTS the app and listens only when run directly, so the
-      API can be tested without opening a port.
-    - entity.extractor / relationship.extractor: const/arrow function values are
-      emitted as Function entities and recognised as CALLS callers.
+10.4 BUILD 02 DELTA (KG fundamentals + relevance + visual identity)
+  Build 02 hardens and completes F1 without restructuring it:
+    - Automated tests (Vitest): backend 8 files / 48 tests (smoke, archive
+      validation, fixture pipeline, resolver, classify, scope, graph-builder,
+      gated Neo4j round-trip) and frontend 4 files / 14 tests (filters +
+      component interactions). New scripts (test, test:watch, typecheck) and a
+      build-only tsconfig that keeps dist/ free of tests.
+    - server.ts EXPORTS the app and listens only when run directly, so the API
+      can be tested without opening a port; startup purges stale extraction
+      directories (KEEP_EXTRACTED opts out).
+    - entity.extractor / relationship.extractor: const/arrow functions are
+      entities, CALLS callers, and (new) CALLS targets; symbol.resolver maps
+      variable/arrow declarations.
     - Relationships carry provenance (evidence: resolution + filePath + line),
-      propagated through graph.builder and persisted as Neo4j relationship
-      properties, then rebuilt by fetchGraph. The API shape is otherwise
-      unchanged, so the frontend is unaffected.
+      persisted as Neo4j relationship properties and rebuilt by fetchGraph.
+    - NEW relevance pass: classify.utils + scope.service set category and
+      inDefaultScope as node properties (reachability keeps relevant modules).
+    - Repository-scoped reload: the frontend requests
+      GET /api/graph?repository=<name> so the reloaded graph equals the analysed
+      one.
+    - Frontend re-themed to a dark technical look with reversible filters
+      (graphFilters.ts + FilterPanel.tsx). API paths, node/relationship types
+      and the API response shape are preserved (extended only), so existing
+      consumers and the Neo4j model remain compatible.
 
 
 ================================================================================
@@ -893,10 +940,13 @@ queries and deletions.
 ================================================================================
 
   - Backend type-checks clean (npx tsc --noEmit).
-  - Automated test suite (npm test, Vitest + Supertest): 3 files / 25 tests, all
-    passing - API smoke tests (mocked Neo4j), fixture-driven pipeline tests over
-    the eight fixtures, and graph-builder unit tests. npm run build produces a
-    clean dist/ with no test artifacts.
+  - Automated test suites: backend 8 files / 48 tests and frontend 4 files /
+    14 tests, all passing. Backend covers API smoke + archive validation
+    (valid ZIP accepted; mislabeled ZIP and .rar rejected), a fixture-driven
+    pipeline suite over ten fixtures, module-resolver, classify, scope,
+    graph-builder, and a gated live Neo4j round-trip. Frontend covers the pure
+    filter logic (incl. a 5000-node graph) and component interactions.
+    npm run build on both produces a clean dist/ with no test artifacts.
   - Relationship provenance verified live against Neo4j: analysing the
     "inheritance" fixture and reading it back returned all relationships with
     evidence, e.g. IMPORTS file:dog.ts -> file:base.ts [resolved @ dog.ts:1] and
@@ -934,10 +984,12 @@ queries and deletions.
     recognised as CALLS callers (calls made from within them are attributed
     correctly).
   - Calls inside object-literal methods are not attributed to a named caller.
+  - File classification is heuristic (path + filename signals); unusual layouts
+    may be mis-categorised (visible via the Application <-> Full toggle).
   - Derived (Repository/Directory) CONTAINS edges carry a resolution but no
     filePath/line, because they are computed from paths rather than a source
     location.
-  - No coverage reporting or CI pipeline yet; the test suite is run manually.
+  - No coverage reporting or CI pipeline yet; the test suites are run manually.
   - No authentication, no multi-user isolation (repository scoping exists but
     there is no user model).
   - The graph is re-analysed in full each time (no incremental analysis).
