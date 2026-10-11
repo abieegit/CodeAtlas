@@ -80,6 +80,8 @@ export async function saveGraph(
                         filePath: $filePath,
                         startLine: $startLine,
                         endLine: $endLine,
+                        category: $category,
+                        inDefaultScope: $inDefaultScope,
                         repository: $repository
                     }
                 )
@@ -91,6 +93,8 @@ export async function saveGraph(
                     filePath: node.filePath,
                     startLine: node.startLine,
                     endLine: node.endLine,
+                    category: node.category ?? null,
+                    inDefaultScope: node.inDefaultScope ?? null,
                     repository: repositoryName
                 }
             );
@@ -155,7 +159,7 @@ export async function fetchGraph(
                 const properties =
                     record.get("n").properties;
 
-                return {
+                const node: GraphNode = {
                     id: properties.id,
                     type: properties.type as EntityType,
                     name: properties.name,
@@ -163,6 +167,19 @@ export async function fetchGraph(
                     startLine: properties.startLine,
                     endLine: properties.endLine
                 };
+
+                if (properties.category) {
+                    node.category = properties.category;
+                }
+
+                if (
+                    properties.inDefaultScope !== null &&
+                    properties.inDefaultScope !== undefined
+                ) {
+                    node.inDefaultScope = properties.inDefaultScope;
+                }
+
+                return node;
             });
 
         const relationshipResult =

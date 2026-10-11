@@ -95,11 +95,21 @@ export async function analyzeRepositoryUpload(
                 extracted.repositoryName
             );
 
+        const categoryCounts: Record<string, number> = {};
+
+        for (const node of result.graph.nodes) {
+            if (node.type === "File" && node.category) {
+                categoryCounts[node.category] =
+                    (categoryCounts[node.category] ?? 0) + 1;
+            }
+        }
+
         response.status(201).json({
             repository: extracted.repositoryName,
             persisted: result.persisted,
             nodeCount: result.graph.nodes.length,
             relationshipCount: result.graph.relationships.length,
+            categoryCounts,
             graph: result.graph
         });
 

@@ -13,6 +13,14 @@ export type RelationshipType =
     | "CALLS"
     | "EXTENDS";
 
+export type FileCategory =
+    | "source"
+    | "test"
+    | "config"
+    | "fixture"
+    | "generated"
+    | "declaration";
+
 export interface GraphNode {
     id: string;
     type: EntityType;
@@ -20,6 +28,8 @@ export interface GraphNode {
     filePath: string;
     startLine: number;
     endLine: number;
+    category?: FileCategory;
+    inDefaultScope?: boolean;
 }
 
 /**

@@ -76,5 +76,9 @@ describe("Neo4j round-trip (gated)", () => {
         );
 
         expect(withEvidence.length).toBe(read.relationships.length);
+
+        expect(
+            read.nodes.every((node) => node.inDefaultScope !== undefined)
+        ).toBe(true);
     });
 });

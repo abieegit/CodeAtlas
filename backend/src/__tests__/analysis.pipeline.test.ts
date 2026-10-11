@@ -278,3 +278,28 @@ describe("analysis pipeline — fault tolerance", () => {
         expect(graph.nodes[0].id).toBe("repository:empty");
     });
 });
+
+describe("analysis pipeline — relevance scope", () => {
+
+    const graph = analyze("relevance");
+
+    it("classifies files by category", () => {
+        const byId = new Map(graph.nodes.map((entry) => [entry.id, entry]));
+
+        expect(byId.get("file:src/app.ts")?.category).toBe("source");
+        expect(byId.get("file:src/app.test.ts")?.category).toBe("test");
+        expect(byId.get("file:src/__fixtures__/sample.ts")?.category).toBe("fixture");
+        expect(byId.get("file:src/generated/api.ts")?.category).toBe("generated");
+        expect(byId.get("file:vite.config.ts")?.category).toBe("config");
+    });
+
+    it("keeps every file in the graph but flags default scope", () => {
+        expect(graph.nodes.filter((entry) => entry.type === "File")).toHaveLength(7);
+
+        const byId = new Map(graph.nodes.map((entry) => [entry.id, entry]));
+
+        expect(byId.get("file:src/app.test.ts")?.inDefaultScope).toBe(false);
+        expect(byId.get("file:src/generated/api.ts")?.inDefaultScope).toBe(true);
+        expect(byId.get("file:shared/util.ts")?.inDefaultScope).toBe(true);
+    });
+});

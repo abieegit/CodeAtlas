@@ -24,6 +24,10 @@ import {
 } from "../parser/graph.builder";
 
 import {
+    annotateScope
+} from "./scope.service";
+
+import {
     createSymbolResolver
 } from "../parser/symbol.resolver";
 
@@ -152,9 +156,11 @@ export function analyzeRepository(
      * ------------------------------------------------
      */
 
-    return buildGraph(
-        allEntities,
-        allRelationships,
-        resolvedRepositoryName
+    return annotateScope(
+        buildGraph(
+            allEntities,
+            allRelationships,
+            resolvedRepositoryName
+        )
     );
 }
