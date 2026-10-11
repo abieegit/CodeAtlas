@@ -156,6 +156,34 @@ export function createSymbolResolver(
                 : `method:${relativeFilePath}:${name.text}`;
         }
 
+        /*
+         * const/arrow function assigned to a variable
+         * (`const x = () => {}` / `const x = function () {}`) is emitted
+         * as a Function entity by entity.extractor, so calls INTO it must
+         * resolve to the same id.
+         */
+        if (ts.isVariableDeclaration(declaration)) {
+
+            const name = declaration.name;
+
+            if (!ts.isIdentifier(name)) {
+                return null;
+            }
+
+            const initializer = declaration.initializer;
+
+            const isFunctionValue =
+                initializer !== undefined &&
+                (ts.isArrowFunction(initializer) ||
+                    ts.isFunctionExpression(initializer));
+
+            if (!isFunctionValue) {
+                return null;
+            }
+
+            return `function:${relativeFilePath}:${name.text}`;
+        }
+
         return null;
     }
 

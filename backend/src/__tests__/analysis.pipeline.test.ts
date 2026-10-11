@@ -194,6 +194,18 @@ describe("analysis pipeline — arrow functions", () => {
 
         expect(contains?.evidence?.resolution).toBe("derived");
     });
+
+    it("resolves a call from a function expression into an arrow target", () => {
+        const calls = findRelationship(
+            graph,
+            "function:util.ts:shout",
+            "CALLS",
+            "function:util.ts:greet"
+        );
+
+        expect(calls).toBeDefined();
+        expect(calls?.evidence?.resolution).toBe("resolved");
+    });
 });
 
 describe("analysis pipeline — duplicate names", () => {

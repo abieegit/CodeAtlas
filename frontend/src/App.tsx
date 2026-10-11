@@ -58,10 +58,13 @@ export default function App() {
 
         try {
 
-            const stored = await loadGraph();
+            const stored = await loadGraph(repository || undefined);
 
             setGraph(stored);
-            setStatus(`Loaded ${stored.nodes.length} nodes from Neo4j`);
+            setStatus(
+                `Loaded ${stored.nodes.length} nodes from Neo4j` +
+                    (repository ? ` (${repository})` : "")
+            );
 
         } catch (error) {
 
@@ -72,7 +75,7 @@ export default function App() {
             setBusy(false);
         }
 
-    }, []);
+    }, [repository]);
 
     return (
         <div className="flex h-full flex-col">

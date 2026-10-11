@@ -37,9 +37,15 @@ export async function analyzeArchive(
     return response.json();
 }
 
-export async function loadGraph(): Promise<GraphData> {
+export async function loadGraph(
+    repository?: string
+): Promise<GraphData> {
 
-    const response = await fetch(`${BASE}/graph`);
+    const query = repository
+        ? `?repository=${encodeURIComponent(repository)}`
+        : "";
+
+    const response = await fetch(`${BASE}/graph${query}`);
 
     if (!response.ok) {
         throw new Error("Failed to load graph");
