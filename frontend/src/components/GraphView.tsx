@@ -73,7 +73,7 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
             .attr("orient", "auto")
             .append("path")
             .attr("d", "M0,-5L10,0L0,5")
-            .attr("fill", "#94a3b8");
+            .attr("fill", "#475569");
 
         const nodes: SimNode[] = graph.nodes.map((node) => ({ ...node }));
 
@@ -87,7 +87,7 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
 
         const link = container
             .append("g")
-            .attr("stroke", "#cbd5e1")
+            .attr("stroke", "#334155")
             .selectAll<SVGLineElement, SimLink>("line")
             .data(links)
             .join("line")
@@ -104,7 +104,7 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
         node.append("circle")
             .attr("r", (datum) => TYPE_RADIUS[datum.type] ?? 8)
             .attr("fill", (datum) => TYPE_COLORS[datum.type] ?? "#64748b")
-            .attr("stroke", "#ffffff")
+            .attr("stroke", "#0b1220")
             .attr("stroke-width", 1.5);
 
         node.append("title")
@@ -128,8 +128,8 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
             .attr("x", 10)
             .attr("y", 4)
             .attr("font-size", 10)
-            .attr("fill", "#334155")
-            .attr("stroke", "#ffffff")
+            .attr("fill", "#cbd5e1")
+            .attr("stroke", "#0b1220")
             .attr("stroke-width", 3)
             .attr("paint-order", "stroke");
 
@@ -260,9 +260,15 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
             return;
         }
 
+        const circle = node.select<SVGCircleElement>("circle");
+
         if (!selectedId) {
             node.attr("opacity", 1);
             link.attr("opacity", 0.6).attr("stroke-width", 1);
+            circle
+                .attr("stroke", "#0b1220")
+                .attr("stroke-width", 1.5)
+                .style("filter", null);
             return;
         }
 
@@ -298,6 +304,19 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
                 endpointId(datum.target) === selectedId
                     ? 2
                     : 1
+            );
+
+        circle
+            .attr("stroke", (datum) =>
+                datum.id === selectedId ? "#22d3ee" : "#0b1220"
+            )
+            .attr("stroke-width", (datum) =>
+                datum.id === selectedId ? 2.5 : 1.5
+            )
+            .style("filter", (datum) =>
+                datum.id === selectedId
+                    ? "drop-shadow(0 0 6px rgba(34,211,238,0.9))"
+                    : null
             );
 
     }, [selectedId, graph]);

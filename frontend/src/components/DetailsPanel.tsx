@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 
-import type { GraphData, GraphNode } from "../types";
+import type {
+    GraphData,
+    GraphNode,
+    RelationshipEvidence
+} from "../types";
 
 interface Props {
     graph: GraphData | null;
@@ -12,7 +16,7 @@ function Row({ label, value }: { label: string; value: string | number }) {
     return (
         <div className="flex justify-between gap-2">
             <dt className="text-slate-500">{label}</dt>
-            <dd className="max-w-[60%] truncate text-right text-slate-800">
+            <dd className="max-w-[60%] truncate text-right text-slate-200">
                 {String(value)}
             </dd>
         </div>
@@ -35,6 +39,7 @@ export default function DetailsPanel({ graph, node, onSelect }: Props) {
             .filter((relationship) => relationship.source === node.id)
             .map((relationship) => ({
                 type: relationship.type,
+                evidence: relationship.evidence,
                 node: byId.get(relationship.target)
             }));
 
@@ -42,6 +47,7 @@ export default function DetailsPanel({ graph, node, onSelect }: Props) {
             .filter((relationship) => relationship.target === node.id)
             .map((relationship) => ({
                 type: relationship.type,
+                evidence: relationship.evidence,
                 node: byId.get(relationship.source)
             }));
 
@@ -51,7 +57,7 @@ export default function DetailsPanel({ graph, node, onSelect }: Props) {
 
     if (!node) {
         return (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500">
                 Click a node to see its details and relationships.
             </p>
         );
@@ -60,12 +66,17 @@ export default function DetailsPanel({ graph, node, onSelect }: Props) {
     return (
         <div className="flex flex-col gap-4">
             <div>
-                <h2 className="text-base font-semibold">{node.name}</h2>
+                <h2 className="text-base font-semibold text-slate-100">
+                    {node.name}
+                </h2>
                 <p className="text-xs text-slate-500">{node.id}</p>
             </div>
 
             <dl className="space-y-1 text-xs">
                 <Row label="Type" value={node.type} />
+                {node.category && (
+                    <Row label="Category" value={node.category} />
+                )}
                 <Row label="File" value={node.filePath || "-"} />
                 <Row label="Start line" value={node.startLine} />
                 <Row label="End line" value={node.endLine} />
@@ -89,6 +100,7 @@ export default function DetailsPanel({ graph, node, onSelect }: Props) {
 interface RelatedItem {
     type: string;
     node?: GraphNode;
+    evidence?: RelationshipEvidence;
 }
 
 function Related({
@@ -104,32 +116,40 @@ function Related({
     if (items.length === 0) {
         return (
             <div>
-                <h3 className="mb-1 text-xs font-semibold uppercase text-slate-400">
+                <h3 className="mb-1 text-xs font-semibold uppercase text-slate-500">
                     {title}
                 </h3>
-                <p className="text-xs text-slate-400">None</p>
+                <p className="text-xs text-slate-500">None</p>
             </div>
         );
     }
 
     return (
         <div>
-            <h3 className="mb-1 text-xs font-semibold uppercase text-slate-400">
+            <h3 className="mb-1 text-xs font-semibold uppercase text-slate-500">
                 {title}
             </h3>
             <ul className="space-y-1">
                 {items.map((item, index) => (
                     <li key={`${item.type}-${item.node?.id ?? index}`}>
                         <button
-                            className="w-full rounded px-2 py-1 text-left text-xs hover:bg-slate-100"
+                            className="w-full rounded px-2 py-1 text-left text-xs hover:bg-panelAlt"
                             onClick={() => onSelect(item.node ?? null)}
                         >
-                            <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] font-medium text-slate-600">
+                            <span className="mr-1 rounded bg-panelAlt px-1 text-[10px] font-medium text-accent">
                                 {item.type}
                             </span>
-                            <span className="text-slate-800">
+                            <span className="text-slate-200">
                                 {item.node?.name ?? "unknown"}
                             </span>
+                            {item.evidence && (
+                                <span className="ml-1 text-[10px] text-slate-500">
+                                    {item.evidence.resolution}
+                                    {item.evidence.line !== undefined
+                                        ? ` \u00b7 L${item.evidence.line}`
+                                        : ""}
+                                </span>
+                            )}
                         </button>
                     </li>
                 ))}

@@ -13,7 +13,7 @@ export default function UploadPanel({ busy, onAnalyze, onLoad }: Props) {
 
     return (
         <div className="flex flex-col gap-3">
-            <label className="text-sm font-medium">
+            <label className="text-sm font-medium text-slate-200">
                 Repository ZIP
             </label>
 
@@ -21,18 +21,18 @@ export default function UploadPanel({ busy, onAnalyze, onLoad }: Props) {
                 ref={inputRef}
                 type="file"
                 accept=".zip"
-                className="block w-full text-xs"
+                className="block w-full text-xs text-slate-400"
                 onChange={(event) =>
                     setFileName(event.target.files?.[0]?.name ?? "")
                 }
             />
 
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500">
                 ZIP archives only (not .rar / .7z).
             </p>
 
             <button
-                className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="rounded bg-accent px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-50"
                 disabled={busy || !fileName}
                 onClick={() => {
                     const file = inputRef.current?.files?.[0];
@@ -45,7 +45,7 @@ export default function UploadPanel({ busy, onAnalyze, onLoad }: Props) {
             </button>
 
             <button
-                className="rounded border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-50"
+                className="rounded border border-edge px-3 py-2 text-sm font-medium text-slate-200 hover:border-accent disabled:opacity-50"
                 disabled={busy}
                 onClick={onLoad}
             >

@@ -1,11 +1,11 @@
 export const TYPE_COLORS: Record<string, string> = {
-    Repository: "#7c3aed",
-    Directory: "#0891b2",
-    File: "#2563eb",
-    Class: "#ea580c",
-    Function: "#16a34a",
-    Method: "#db2777",
-    Variable: "#64748b"
+    Repository: "#a78bfa",
+    Directory: "#22d3ee",
+    File: "#60a5fa",
+    Class: "#fb923c",
+    Function: "#4ade80",
+    Method: "#f472b6",
+    Variable: "#94a3b8"
 };
 
 export const TYPE_RADIUS: Record<string, number> = {
