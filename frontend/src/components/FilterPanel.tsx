@@ -28,16 +28,16 @@ export default function FilterPanel({
         <div className="flex flex-col gap-3 text-xs">
 
             <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-300">Scope</span>
-                <div className="flex overflow-hidden rounded border border-edge">
+                <span className="font-semibold text-neutral-300">Scope</span>
+                <div className="flex overflow-hidden rounded border border-neutral-800">
                     {(["application", "full"] as const).map((scope) => (
                         <button
                             key={scope}
                             className={
                                 "px-2 py-1 " +
                                 (filters.scope === scope
-                                    ? "bg-accent/20 text-accent"
-                                    : "text-slate-400 hover:text-slate-200")
+                                    ? "bg-white text-black"
+                                    : "text-neutral-400 hover:text-white")
                             }
                             onClick={() => onChange({ ...filters, scope })}
                         >
@@ -48,14 +48,14 @@ export default function FilterPanel({
             </div>
 
             <fieldset>
-                <legend className="mb-1 font-semibold text-slate-300">
+                <legend className="mb-1 font-semibold text-neutral-300">
                     Node types
                 </legend>
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
                     {ALL_ENTITY_TYPES.map((type) => (
                         <label
                             key={type}
-                            className="flex items-center gap-1 text-slate-400"
+                            className="flex items-center gap-1 text-neutral-400"
                         >
                             <input
                                 type="checkbox"
@@ -74,14 +74,14 @@ export default function FilterPanel({
             </fieldset>
 
             <fieldset>
-                <legend className="mb-1 font-semibold text-slate-300">
+                <legend className="mb-1 font-semibold text-neutral-300">
                     Relationships
                 </legend>
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
                     {ALL_RELATIONSHIP_TYPES.map((type) => (
                         <label
                             key={type}
-                            className="flex items-center gap-1 text-slate-400"
+                            className="flex items-center gap-1 text-neutral-400"
                         >
                             <input
                                 type="checkbox"
@@ -102,10 +102,10 @@ export default function FilterPanel({
                 </div>
             </fieldset>
 
-            <label className="flex flex-col gap-1 text-slate-400">
-                <span className="font-semibold text-slate-300">Directory</span>
+            <label className="flex flex-col gap-1 text-neutral-400">
+                <span className="font-semibold text-neutral-300">Directory</span>
                 <select
-                    className="rounded border border-edge bg-panelAlt px-2 py-1 text-slate-200"
+                    className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-white"
                     value={filters.directory ?? ""}
                     onChange={(event) =>
                         onChange({
@@ -127,8 +127,8 @@ export default function FilterPanel({
                 className={
                     "rounded border px-2 py-1 disabled:opacity-40 " +
                     (filters.focusNodeId
-                        ? "border-accent text-accent"
-                        : "border-edge text-slate-400 hover:text-slate-200")
+                        ? "border-white text-white"
+                        : "border-neutral-800 text-neutral-400 hover:text-white")
                 }
                 disabled={!selectedId && !filters.focusNodeId}
                 onClick={() =>
