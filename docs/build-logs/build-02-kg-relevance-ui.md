@@ -230,6 +230,13 @@ The shape is otherwise unchanged, so existing consumers keep working.
 - **Live Neo4j round-trip:** analysing the `inheritance` fixture and reading it back returned the
   same node/relationship counts with **all relationships carrying evidence**, and `category` /
   `inDefaultScope` present on nodes; repository-scoped cleanup left other repositories untouched.
+- **Real repository end-to-end (HTTP):** `axios` (170 files, good structure) uploaded via
+  `POST /api/repositories/analyze` → **576 nodes / 1 028 relationships**, `persisted: true`,
+  categories `{ source 89, test 78, config 2, declaration 1 }`, **all 1 028 relationships carry
+  evidence** (`resolved` 451, `derived` 575, `name-match` 2), 90/170 files in default scope.
+  `GET /api/graph?repository=axios` read back the identical 576/1 028 with evidence and scope
+  intact (same node set), and `GET /api/repositories` returned only the expected repositories.
+  (TripBuddy itself was unavailable; axios stands in as the real-repo check for criterion 11.)
 
 ---
 
