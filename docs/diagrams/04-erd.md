@@ -92,6 +92,10 @@ erDiagram
 | `EXTENDS` | A class extends another (matched by name). | Yes |
 | `MUTATES` / data-flow | Proposal-scope richer relationships. | Planned |
 
+Each relationship may also carry **provenance** properties — `resolution`
+(`derived` | `resolved` | `name-match`), plus `filePath` and `line` — recording *how* the edge
+was discovered (`CONTAINS`→`derived`, `IMPORTS`/`CALLS`→`resolved`, `EXTENDS`→`name-match`).
+
 > IDs are **repository-relative** and globally unique within one analysed repository;
 > physical filesystem paths are never exposed in the graph.
 

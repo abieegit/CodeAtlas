@@ -144,6 +144,8 @@ codeatlas-prototype/
   backend/
     package.json                backend deps + npm scripts
     tsconfig.json               TypeScript config (includes all of src/)
+    tsconfig.build.json         build-only config (excludes tests + fixtures)
+    vitest.config.ts            test runner configuration
     .env                        real secrets/config (never commit)
     .env.example                template
     .gitignore
@@ -172,6 +174,8 @@ codeatlas-prototype/
         graph.service.ts        Neo4j persistence + retrieval
       controllers/repository.controller.ts  HTTP handlers
       routes/repository.routes.ts           Express router + multer
+      __tests__/               automated tests (Vitest + Supertest)
+      test-fixtures/           tiny focused repositories used by the tests
       test-project/            small sample repo used by demo scripts
       test-*.ts                manual pipeline demo scripts
 
@@ -232,13 +236,30 @@ backend/package.json
     neo4j-driver                     -> Neo4j Bolt driver
     unzipper                         -> ZIP extraction
     dotenv                           -> .env loading
+  Dev dependencies:
+    vitest, supertest                -> automated tests (runner + HTTP)
+    typescript, ts-node-dev          -> type-checking, dev server
   Scripts:
-    dev     = ts-node-dev --respawn --transpile-only src/server.ts
-    build   = tsc
-    start   = node dist/server.js
-    analyze = ts-node src/test-analysis.ts
+    dev        = ts-node-dev --respawn --transpile-only src/server.ts
+    build      = tsc -p tsconfig.build.json   (excludes tests/fixtures)
+    start      = node dist/server.js
+    analyze    = ts-node src/test-analysis.ts
+    typecheck  = tsc --noEmit
+    test       = vitest run
+    test:watch = vitest
   (dev-broken script from before: the original only had a placeholder "test"
    script and no way to start the server.)
+
+backend/tsconfig.build.json
+  Build-only TypeScript config that extends tsconfig.json and EXCLUDES
+  src/**/*.test.ts and src/test-fixtures/**, so `npm run build` never emits
+  test artifacts into dist/. `npm run typecheck` uses tsconfig.json and so
+  still type-checks the tests.
+
+backend/vitest.config.ts
+  Vitest configuration: node environment, includes src/**/*.test.ts, and
+  excludes node_modules, dist, extracted and src/test-fixtures/** (the
+  fixtures are sample code, not specs).
 
 backend/tsconfig.json
   Strict TypeScript, CommonJS output to dist/. "include": ["src"] so ALL
@@ -267,9 +288,15 @@ backend/src/models/graph.types.ts
                         Method | Variable
     RelationshipType  = CONTAINS | IMPORTS | CALLS | EXTENDS
     GraphNode         { id, type, name, filePath, startLine, endLine }
-    GraphRelationship { source, target, type }
+    GraphRelationship { source, target, type, evidence? }
+    RelationshipEvidence { filePath?, line?, resolution }
+    ResolutionMethod  = derived | resolved | name-match
     GraphData         { nodes[], relationships[] }
-  The frontend mirrors these in its own types.ts.
+  "evidence" records HOW an edge was found (provenance): "derived" for
+  structural ownership computed from paths, "resolved" for a concrete target
+  resolved via an import path or the TS symbol resolver, and "name-match" for
+  EXTENDS (matched by class name). It is optional so the type stays
+  backward-compatible; the frontend mirrors these in its own types.ts.
 
 backend/src/utils/ignore.utils.ts
   Defines IGNORED_DIRECTORIES (node_modules, .git, dist, build, coverage,
@@ -314,6 +341,10 @@ backend/src/parser/entity.extractor.ts
   - Always emits one "File" node (id file:<relativePath>).
   - ClassDeclaration   -> Class node   (id class:<path>:<ClassName>)
   - FunctionDeclaration-> Function node(id function:<path>:<Name>)
+  - VariableDeclarator -> Function node(id function:<path>:<Name>) WHEN the
+    initializer is a function value (`const x = () => {}` or
+    `const x = function () {}`). This represents modern JS/TS codebases where a
+    large share of functions are declared as arrow/const functions.
   - ClassMethod        -> Method node  (id method:<path>:<ClassName>:<Name>)
     The method id is QUALIFIED with its enclosing class name, so two classes
     in the same file can share a method name without colliding.
@@ -325,19 +356,24 @@ backend/src/parser/relationship.extractor.ts
       filePath          repository-relative (used for IDs)
       absoluteFilePath  physical path (used for import resolution)
       repositoryRoot    repo root (used to make resolved paths relative)
-  Produces:
+  Produces (each edge tagged with provenance via an "evidence" object):
     CONTAINS : file -> class, class -> method, file -> function
-    IMPORTS  : file -> resolved local file   (via module-resolver)
-    EXTENDS  : class -> superclass           (best-effort, by name)
-    CALLS    : function/method -> resolved callee  (via symbol-resolver)
+               (including const/arrow functions)          [derived]
+    IMPORTS  : file -> resolved local file   (via module-resolver) [resolved]
+    EXTENDS  : class -> superclass           (best-effort, by name) [name-match]
+    CALLS    : function/method -> resolved callee (via symbol-resolver) [resolved]
   Helpers:
     getMethodKey(node)      extracts a method's name (Identifier or string key)
     findClassEntityId(name) matches a superclass name to a Class entity
                             (same file first, then anywhere; if not found the
                              EXTENDS edge is simply omitted)
+    isFunctionValue(node)   true for `() => {}` / `function () {}` initializers,
+                            mirroring entity.extractor so CONTAINS and CALLS
+                            attribute to the same Function entity
   CALLS logic: for each CallExpression it finds the enclosing function/method
-  (the "caller"), then asks the symbol resolver to resolve the call target at
-  the call's start offset; the edge is only emitted if the target node exists.
+  (the "caller" - a FunctionDeclaration, a ClassMethod, or a const/arrow
+  function), then asks the symbol resolver to resolve the call target at the
+  call's start offset; the edge is only emitted if the target node exists.
 
 backend/src/parser/module-resolver.ts
   resolveModule(currentAbsoluteFilePath, importPath, repositoryRoot): maps a
@@ -371,10 +407,12 @@ backend/src/parser/graph.builder.ts
   - Creates the Repository node (id repository:<name>).
   - Deduplicates nodes by id (Map).
   - Derives Directory nodes from each File node's path and adds CONTAINS
-    edges repository -> top-level dir/file, dir -> child dir/file.
+    edges repository -> top-level dir/file, dir -> child dir/file. These
+    derived edges are tagged evidence.resolution = "derived".
   - Filters out relationships whose source or target node does not exist
     (dangling edges) and self-loops.
-  - Deduplicates relationships by source|type|target.
+  - Deduplicates relationships by source|type|target (evidence carried on the
+    first occurrence is preserved).
   Returns a clean GraphData { nodes, relationships }.
 
 
@@ -437,11 +475,14 @@ backend/src/services/graph.service.ts
                               DELETE n), then CREATes each node with labels
                               :Entity:<Type> plus properties (id, type, name,
                               filePath, startLine, endLine, repository) and
-                              each relationship. Re-analysing the same
-                              repository is idempotent and does NOT touch
-                              other repositories.
+                              each relationship, storing the relationship's
+                              provenance as properties (line, filePath,
+                              resolution). Re-analysing the same repository is
+                              idempotent and does NOT touch other repositories.
     fetchGraph(repository?) reads nodes + relationships back out (optionally
-                            scoped to one repository).
+                            scoped to one repository) and rebuilds the
+                            "evidence" object when a resolution property is
+                            present.
     listRepositories()      returns the names of repositories with a graph.
     verifyConnection()      used by the health endpoint; returns true/false.
 
@@ -477,12 +518,39 @@ backend/src/server.ts
     - mount the router under /api
     - a 404 handler (JSON)
     - a central error handler (logs and returns JSON 500)
-    - listens on env.port (default 5000)
+    - EXPORTS the app; it only calls listen() (env.port, default 5000) when the
+      file is run directly (require.main === module), so tests can import the
+      app with Supertest without opening a port.
 
 
 --------------------------------------------------------------------------------
  5F. BACKEND - TEST / DEMO SCRIPTS
 --------------------------------------------------------------------------------
+
+AUTOMATED TESTS  (npm test / npm run test:watch; Vitest + Supertest)
+
+src/__tests__/app.smoke.test.ts
+  API smoke tests with the Neo4j layer mocked: a JSON 404 for unknown routes,
+  /api/health using the mocked connectivity check, and /api/repositories.
+src/__tests__/analysis.pipeline.test.ts
+  Fixture-driven integration tests over the REAL pipeline (no mocks): runs
+  analyzeRepository on each fixture and asserts the resulting nodes/edges and
+  their provenance - resolved IMPORTS + cross-file CALLS (imports), local and
+  cross-file calls (calls), name-match EXTENDS (inheritance), const/arrow
+  Function entities (arrow-functions), distinct same-named functions/methods
+  (duplicate-names), omitted unresolvable edges (unresolved), a skipped
+  unparsable file (unsupported) and a repository-only graph (empty).
+src/__tests__/graph.builder.test.ts
+  Unit tests for assembly and validation: Repository/Directory derivation,
+  derived CONTAINS evidence, node de-duplication, dangling/self-loop/duplicate
+  edge removal, and preservation of incoming evidence.
+
+src/test-fixtures/
+  Eight tiny, focused repositories (arrow-functions, calls, duplicate-names,
+  empty, imports, inheritance, unresolved, unsupported) used by the pipeline
+  tests. Excluded from type-checking and from the build.
+
+MANUAL DEMO SCRIPTS
 
 src/test-project/sample.ts, userService.ts
   A tiny artificial sample repo (a controller class, functions, and a service
@@ -641,6 +709,12 @@ Relationship types:
   CALLS    : a function/method calls another function/method
   EXTENDS  : a class extends another class
 
+Relationship provenance (evidence):
+  Each edge may carry { filePath?, line?, resolution } where resolution is
+  "derived" (computed from paths/ownership), "resolved" (concrete target from an
+  import path or the TS symbol resolver) or "name-match" (EXTENDS, matched by
+  class name). In Neo4j these are stored as relationship properties.
+
 Each node also carries: name, filePath, startLine, endLine.
 In Neo4j every node is labeled :Entity and also with its specific type
 (e.g. :Entity:Function), and stores a "repository" property used to scope
@@ -663,7 +737,8 @@ queries and deletions.
   GET  /api/repositories              -> { repositories: [ "name", ... ] }
 
   graph = { "nodes": [ {id,type,name,filePath,startLine,endLine}, ... ],
-            "relationships": [ {source,target,type}, ... ] }
+            "relationships": [ {source,target,type,
+                                evidence:{filePath,line,resolution}}, ... ] }
 
 
 ================================================================================
@@ -797,12 +872,35 @@ queries and deletions.
       graph, with node details and relationship navigation, resilient to bad
       files and an unavailable database.
 
+10.4 BUILD 02 DELTA (tests + provenance)   [architecture unchanged]
+  Build 02 hardens the prototype without restructuring it:
+    - Automated tests introduced (Vitest + Supertest): API smoke tests, a
+      fixture-driven pipeline suite (8 fixtures) and graph-builder unit tests;
+      new package.json scripts (test, test:watch, typecheck) and a build-only
+      tsconfig (tsconfig.build.json) that keeps dist/ free of tests.
+    - server.ts now EXPORTS the app and listens only when run directly, so the
+      API can be tested without opening a port.
+    - entity.extractor / relationship.extractor: const/arrow function values are
+      emitted as Function entities and recognised as CALLS callers.
+    - Relationships carry provenance (evidence: resolution + filePath + line),
+      propagated through graph.builder and persisted as Neo4j relationship
+      properties, then rebuilt by fetchGraph. The API shape is otherwise
+      unchanged, so the frontend is unaffected.
+
 
 ================================================================================
 11. VERIFICATION / EVIDENCE
 ================================================================================
 
   - Backend type-checks clean (npx tsc --noEmit).
+  - Automated test suite (npm test, Vitest + Supertest): 3 files / 25 tests, all
+    passing - API smoke tests (mocked Neo4j), fixture-driven pipeline tests over
+    the eight fixtures, and graph-builder unit tests. npm run build produces a
+    clean dist/ with no test artifacts.
+  - Relationship provenance verified live against Neo4j: analysing the
+    "inheritance" fixture and reading it back returned all relationships with
+    evidence, e.g. IMPORTS file:dog.ts -> file:base.ts [resolved @ dog.ts:1] and
+    EXTENDS class:dog.ts:Dog -> class:base.ts:Animal [name-match @ dog.ts:3].
   - A REAL repository (sindresorhus/ky) was analysed successfully end-to-end
     through the HTTP API:
         Full repo (87 files) : 148 nodes / 298 relationships
@@ -830,8 +928,16 @@ queries and deletions.
     design - F1 prioritises a working graph over perfect accuracy).
   - EXTENDS is matched by class NAME (same file first), so a same-named class
     elsewhere could theoretically be chosen.
-  - CALLS inside arrow functions / object methods are not attributed to a
-    named caller.
+  - Calls INTO const/arrow functions are not resolved: symbol.resolver maps only
+    function/method declaration nodes, so a call whose target is a `const x =
+    () => {}` is omitted. Const/arrow functions ARE emitted as entities and ARE
+    recognised as CALLS callers (calls made from within them are attributed
+    correctly).
+  - Calls inside object-literal methods are not attributed to a named caller.
+  - Derived (Repository/Directory) CONTAINS edges carry a resolution but no
+    filePath/line, because they are computed from paths rather than a source
+    location.
+  - No coverage reporting or CI pipeline yet; the test suite is run manually.
   - No authentication, no multi-user isolation (repository scoping exists but
     there is no user model).
   - The graph is re-analysed in full each time (no incremental analysis).

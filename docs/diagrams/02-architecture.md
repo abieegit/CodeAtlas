@@ -102,3 +102,15 @@ flowchart LR
 - **One bad file never aborts analysis** (per-file fault tolerance).
 - **Persistence is best-effort** — if Neo4j is down the graph is still returned
   (`persisted: false`).
+
+### Verification tooling (F1)
+
+The prototype is covered by an automated test suite and three quality gates:
+
+- **Vitest + Supertest** — specs in `backend/src/__tests__` driven by fixture repositories in
+  `backend/src/test-fixtures`.
+- **Gates** — `npm test`, `npm run typecheck` (`tsc --noEmit`), and `npm run build`
+  (`tsc -p tsconfig.build.json`, which excludes tests/fixtures from `dist`).
+- **Edge provenance** — every relationship records how it was found (`resolution` =
+  `derived` | `resolved` | `name-match`, plus `filePath` / `line`), persisted as Neo4j
+  relationship properties.

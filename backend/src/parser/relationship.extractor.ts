@@ -2,7 +2,11 @@ import traverse from "@babel/traverse";
 
 import { File, ClassMethod } from "@babel/types";
 
-import { GraphNode, GraphRelationship } from "../models/graph.types";
+import {
+    GraphNode,
+    GraphRelationship,
+    RelationshipEvidence
+} from "../models/graph.types";
 
 import { resolveModule } from "./module-resolver";
 
@@ -18,6 +22,25 @@ export interface RelationshipContext {
     filePath: string;
     absoluteFilePath: string;
     repositoryRoot: string;
+}
+
+/**
+ * True when an initializer is a function value (`() => {}` /
+ * `function () {}`) assigned to a variable, mirroring entity.extractor so
+ * CONTAINS and CALLS attribute to the same Function entity.
+ */
+function isFunctionValue(node: unknown): boolean {
+
+    if (!node || typeof node !== "object") {
+        return false;
+    }
+
+    const type = (node as { type?: string }).type;
+
+    return (
+        type === "ArrowFunctionExpression" ||
+        type === "FunctionExpression"
+    );
 }
 
 function getMethodKey(node: ClassMethod): string | null {
@@ -68,6 +91,14 @@ export function extractRelationships(
 
     const fileId = `file:${context.filePath}`;
 
+    const derivedEvidence = (
+        line?: number | null
+    ): RelationshipEvidence => ({
+        filePath: context.filePath,
+        line: line ?? undefined,
+        resolution: "derived"
+    });
+
     /*
      * =====================================================
      * CONTAINS relationships
@@ -90,7 +121,8 @@ export function extractRelationships(
             relationships.push({
                 source: fileId,
                 target: classId,
-                type: "CONTAINS"
+                type: "CONTAINS",
+                evidence: derivedEvidence(path.node.loc?.start.line)
             });
 
             for (const node of path.node.body.body) {
@@ -111,7 +143,8 @@ export function extractRelationships(
                 relationships.push({
                     source: classId,
                     target: methodId,
-                    type: "CONTAINS"
+                    type: "CONTAINS",
+                    evidence: derivedEvidence(node.loc?.start.line)
                 });
             }
         },
@@ -127,7 +160,30 @@ export function extractRelationships(
             relationships.push({
                 source: fileId,
                 target: `function:${context.filePath}:${functionName}`,
-                type: "CONTAINS"
+                type: "CONTAINS",
+                evidence: derivedEvidence(path.node.loc?.start.line)
+            });
+        },
+
+        // Arrow / const function assigned to a variable (mirrors
+        // entity.extractor so the Function node has a containing file).
+        VariableDeclarator(path) {
+
+            if (!isFunctionValue(path.node.init)) {
+                return;
+            }
+
+            const id = path.node.id;
+
+            if (id.type !== "Identifier") {
+                return;
+            }
+
+            relationships.push({
+                source: fileId,
+                target: `function:${context.filePath}:${id.name}`,
+                type: "CONTAINS",
+                evidence: derivedEvidence(path.node.loc?.start.line)
             });
         }
     });
@@ -158,7 +214,12 @@ export function extractRelationships(
             relationships.push({
                 source: fileId,
                 target: `file:${resolved}`,
-                type: "IMPORTS"
+                type: "IMPORTS",
+                evidence: {
+                    filePath: context.filePath,
+                    line: path.node.loc?.start.line,
+                    resolution: "resolved"
+                }
             });
         }
     });
@@ -203,7 +264,12 @@ export function extractRelationships(
             relationships.push({
                 source: `class:${context.filePath}:${className}`,
                 target: targetId,
-                type: "EXTENDS"
+                type: "EXTENDS",
+                evidence: {
+                    filePath: context.filePath,
+                    line: path.node.loc?.start.line,
+                    resolution: "name-match"
+                }
             });
         }
     });
@@ -223,7 +289,9 @@ export function extractRelationships(
             const callerPath = path.findParent(
                 (parentPath) =>
                     parentPath.isFunctionDeclaration() ||
-                    parentPath.isClassMethod()
+                    parentPath.isClassMethod() ||
+                    (parentPath.isVariableDeclarator() &&
+                        isFunctionValue(parentPath.node.init))
             );
 
             if (!callerPath) {
@@ -239,6 +307,14 @@ export function extractRelationships(
                 if (functionName) {
                     callerId =
                         `function:${context.filePath}:${functionName}`;
+                }
+            } else if (callerPath.isVariableDeclarator()) {
+
+                const id = callerPath.node.id;
+
+                if (id.type === "Identifier") {
+                    callerId =
+                        `function:${context.filePath}:${id.name}`;
                 }
             } else if (callerPath.isClassMethod()) {
 
@@ -293,7 +369,12 @@ export function extractRelationships(
             relationships.push({
                 source: callerId,
                 target: targetId,
-                type: "CALLS"
+                type: "CALLS",
+                evidence: {
+                    filePath: context.filePath,
+                    line: path.node.loc?.start.line,
+                    resolution: "resolved"
+                }
             });
         }
     });

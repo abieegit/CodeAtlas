@@ -94,6 +94,18 @@ classDiagram
         +string source
         +string target
         +RelationshipType type
+        +RelationshipEvidence evidence
+    }
+    class RelationshipEvidence {
+        +string filePath
+        +number line
+        +ResolutionMethod resolution
+    }
+    class ResolutionMethod {
+        <<enumeration>>
+        derived
+        resolved
+        name-match
     }
     class GraphData {
         +List~GraphNode~ nodes
@@ -159,6 +171,8 @@ classDiagram
     GraphBuilder --> GraphData
     GraphBuilder --> GraphNode
     GraphBuilder --> GraphRelationship
+    GraphRelationship --> RelationshipEvidence
+    RelationshipEvidence --> ResolutionMethod
     GraphService --> GraphData
     GraphService --> Neo4jDriver
     ParserService --> AnalysisResult

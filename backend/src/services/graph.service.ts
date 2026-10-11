@@ -103,12 +103,19 @@ export async function saveGraph(
                 MATCH (source:Entity {id: $source, repository: $repository})
                 MATCH (target:Entity {id: $target, repository: $repository})
 
-                CREATE (source)-[:${relationshipType(relationship.type)}]->(target)
+                CREATE (source)-[r:${relationshipType(relationship.type)} {
+                    line: $line,
+                    filePath: $filePath,
+                    resolution: $resolution
+                }]->(target)
                 `,
                 {
                     source: relationship.source,
                     target: relationship.target,
-                    repository: repositoryName
+                    repository: repositoryName,
+                    line: relationship.evidence?.line ?? null,
+                    filePath: relationship.evidence?.filePath ?? null,
+                    resolution: relationship.evidence?.resolution ?? null
                 }
             );
         }
@@ -163,11 +170,13 @@ export async function fetchGraph(
                 repositoryName
                     ? `
                         MATCH (a:Entity {repository: $repository})-[r]->(b:Entity {repository: $repository})
-                        RETURN a.id AS source, type(r) AS type, b.id AS target
+                        RETURN a.id AS source, type(r) AS type, b.id AS target,
+                               r.line AS line, r.filePath AS filePath, r.resolution AS resolution
                       `
                     : `
                         MATCH (a:Entity)-[r]->(b:Entity)
-                        RETURN a.id AS source, type(r) AS type, b.id AS target
+                        RETURN a.id AS source, type(r) AS type, b.id AS target,
+                               r.line AS line, r.filePath AS filePath, r.resolution AS resolution
                       `,
                 repositoryName
                     ? { repository: repositoryName }
@@ -175,11 +184,26 @@ export async function fetchGraph(
             );
 
         const relationships: GraphRelationship[] =
-            relationshipResult.records.map((record) => ({
-                source: record.get("source"),
-                type: record.get("type") as RelationshipType,
-                target: record.get("target")
-            }));
+            relationshipResult.records.map((record) => {
+
+                const resolution = record.get("resolution");
+
+                const relationship: GraphRelationship = {
+                    source: record.get("source"),
+                    type: record.get("type") as RelationshipType,
+                    target: record.get("target")
+                };
+
+                if (resolution) {
+                    relationship.evidence = {
+                        filePath: record.get("filePath") ?? undefined,
+                        line: record.get("line") ?? undefined,
+                        resolution
+                    };
+                }
+
+                return relationship;
+            });
 
         return { nodes, relationships };
 

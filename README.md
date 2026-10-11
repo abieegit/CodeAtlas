@@ -92,8 +92,14 @@ Physical filesystem paths are never exposed in the graph.
 ## Tests / scripts (backend)
 
 ```bash
-npx tsc --noEmit           # type-check
+npm test                   # Vitest suite (25 tests, fixture-driven pipeline + API)
+npm run test:watch         # re-run tests on change
+npm run typecheck          # tsc --noEmit
+npm run build              # tsc -p tsconfig.build.json (dist/ excludes tests)
 npm run analyze            # analyze the bundled src/test-project sample
-npx ts-node src/test-parser.ts
-npx ts-node src/test-resolver.ts
 ```
+
+Relationships in the returned graph may carry an `evidence` object
+(`{ filePath, line, resolution }`) recording how each edge was found
+(`derived` | `resolved` | `name-match`). See `docs/build-logs/` for the
+per-build history and `docs/diagrams/` for the system diagrams.

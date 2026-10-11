@@ -86,7 +86,8 @@ export function buildGraph(
             derived.push({
                 source: parentId,
                 target: directoryId,
-                type: "CONTAINS"
+                type: "CONTAINS",
+                evidence: { resolution: "derived" }
             });
 
             parentId = directoryId;
@@ -95,7 +96,8 @@ export function buildGraph(
         derived.push({
             source: parentId,
             target: file.id,
-            type: "CONTAINS"
+            type: "CONTAINS",
+            evidence: { resolution: "derived" }
         });
     }
 

@@ -13,6 +13,9 @@
     "include": [
         "src"
     ],
+    "exclude": [
+        "src/test-fixtures"
+    ],
     "ts-node": {
         "files": true
     }

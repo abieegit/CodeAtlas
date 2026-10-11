@@ -5,6 +5,28 @@ import {
     GraphNode
 } from "../models/graph.types";
 
+/**
+ * True when an initializer is a function value assigned to a variable,
+ * i.e. `const x = () => {}` or `const x = function () {}`. These are
+ * emitted as Function entities so modern JS/TS codebases are represented
+ * (a large share of functions in real repos are declared this way).
+ */
+function isFunctionValue(
+    node: unknown
+): boolean {
+
+    if (!node || typeof node !== "object") {
+        return false;
+    }
+
+    const type = (node as { type?: string }).type;
+
+    return (
+        type === "ArrowFunctionExpression" ||
+        type === "FunctionExpression"
+    );
+}
+
 export function extractEntities(
     ast: File,
     filePath: string
@@ -69,6 +91,38 @@ export function extractEntities(
                 id: `function:${filePath}:${name}`,
                 type: "Function",
                 name: name,
+                filePath: filePath,
+                startLine: path.node.loc?.start.line ?? 0,
+                endLine: path.node.loc?.end.line ?? 0
+            });
+        },
+
+        // -----------------------------------------
+        // ARROW / CONST FUNCTION
+        //
+        // `const name = () => {}` and
+        // `const name = function () {}` are
+        // emitted as Function entities with the
+        // same id scheme as declarations, so call
+        // edges can attribute to and from them.
+        // -----------------------------------------
+
+        VariableDeclarator(path) {
+
+            if (!isFunctionValue(path.node.init)) {
+                return;
+            }
+
+            const id = path.node.id;
+
+            if (id.type !== "Identifier") {
+                return;
+            }
+
+            nodes.push({
+                id: `function:${filePath}:${id.name}`,
+                type: "Function",
+                name: id.name,
                 filePath: filePath,
                 startLine: path.node.loc?.start.line ?? 0,
                 endLine: path.node.loc?.end.line ?? 0

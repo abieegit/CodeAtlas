@@ -8,3 +8,5 @@
 - Wants comprehensive, minute-detail documentation (file-by-file walkthroughs, end-to-end execution flow, and a "before vs. after" account of architecture changes), written in plain text and presentation-ready for a supervisor. Confidence: 0.7
 - Wants a versioned build log maintained as one file per major build increment, opened at the start of a build and closed when the next begins (typically triggered by a supervisor meeting). Confidence: 0.85
 - Wants each build-log entry to carry a unique file name, build number, and build name, plus the build context (meeting goal and targets), all current features, the complete technology stack (with exact versions), and the end-to-end flow of execution. Confidence: 0.85
+- Wants the set of "parallel" documents kept consistent with each other after every build increment — when behaviour changes, sync the build-log index, the system guide, the system diagrams, and the README together, not just the build log. Confidence: 0.8
+- Expects each new build log to be registered as a row in the build-logs index (`docs/build-logs/README.md`) alongside the per-build file. Confidence: 0.7

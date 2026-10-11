@@ -9,7 +9,7 @@ import { env } from "./config/env";
 
 import repositoryRoutes from "./routes/repository.routes";
 
-const app = express();
+export const app = express();
 
 app.use(cors());
 app.use(express.json());
@@ -38,8 +38,10 @@ app.use(
     }
 );
 
-app.listen(env.port, () => {
-    console.log(
-        `[server] CodeAtlas API listening on http://localhost:${env.port}`
-    );
-});
+if (require.main === module) {
+    app.listen(env.port, () => {
+        console.log(
+            `[server] CodeAtlas API listening on http://localhost:${env.port}`
+        );
+    });
+}
