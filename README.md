@@ -63,11 +63,15 @@ The dev server proxies `/api` to `http://localhost:5000`.
 The dashboard has two tabs over the same loaded graph:
 
 - **Knowledge Graph** — the interactive D3 map (zoom, pan, drag, select) with reversible filters
-  (scope, node type, relationship type, directory, focus).
+  (scope, node type, relationship type, directory, focus), a search bar that navigates to any
+  node (offering to reveal filter-hidden results), an explicit **Fit graph** action, and an
+  optional, experimental architectural icon overlay (visualisation-only).
 - **Execution Flows** — call-based pipelines derived client-side from `CALLS` edges
   (`deriveExecutionFlows`), animated step by step with Play/Pause.
 
-Both read the graph already in memory; switching tabs issues no extra request.
+Both read the graph already in memory; switching tabs issues no extra request. Zoom, pan and
+dragged node positions persist across filter changes, searches, tab switches and simulation
+settle; a fresh layout is auto-fitted once, only when a different repository is loaded.
 
 ## REST API
 
@@ -111,7 +115,7 @@ npm run build              # tsc -p tsconfig.build.json (dist/ excludes tests)
 
 # frontend (Vitest + Testing Library)
 cd frontend
-npm test                   # 5 files / 18 tests: filters, execution flows, panel interactions
+npm test                   # 11 files / 70 tests: viewport, search, icons, filters, panels
 npx tsc -p tsconfig.json --noEmit
 npm run build
 ```

@@ -39,11 +39,11 @@ const RULES: Array<{ role: ArchRole; pattern: RegExp }> = [
     {
         role: "payment",
         pattern:
-            /payment|billing|checkout|invoice|stripe|paypal|braintree|(^|[^a-z])cart([^a-z]|$)/i
+            /payment|billing|checkout|invoice|(^|[^a-z])(stripe|paypal|braintree|cart)([^a-z]|$)/i
     },
     {
         role: "auth",
-        pattern: /auth|jwt|oauth|passport|credential|rbac|session/i
+        pattern: /auth|jwt|oauth|credential|rbac|session/i
     },
     {
         role: "login",

@@ -91,6 +91,29 @@ describe("classifyArchitecturalRole", () => {
         ).toBeNull();
     });
 
+    it("does not classify keyword substring collisions", () => {
+        // "stripEmptyErrors" must not match the "stripe" payment keyword.
+        expect(
+            classifyArchitecturalRole(
+                node(
+                    "Method",
+                    "stripEmptyErrors",
+                    "src/validation/ValidationExecutor.ts"
+                )
+            )
+        ).toBeNull();
+        // A passport-number validator is about documents, not Passport.js.
+        expect(
+            classifyArchitecturalRole(
+                node(
+                    "File",
+                    "IsPassportNumber.ts",
+                    "src/decorator/string/IsPassportNumber.ts"
+                )
+            )
+        ).toBeNull();
+    });
+
     it("is deterministic for repeated calls", () => {
         const candidate = node("File", "stripe.ts", "src/payments/stripe.ts");
 

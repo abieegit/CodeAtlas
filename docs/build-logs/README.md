@@ -39,6 +39,7 @@ Each build log must contain, in order:
 | --- | --- | --- | --- | --- |
 | 01 | prototype-test01 | [build-01-prototype-test01.md](./build-01-prototype-test01.md) | Closed | 2026-10-09 |
 | 02 | kg-relevance-ui | [build-02-kg-relevance-ui.md](./build-02-kg-relevance-ui.md) | Closed | 2026-10-13 |
+| 03 | graph-navigation | [build-03-graph-navigation.md](./build-03-graph-navigation.md) | Open | 2026-10-13 |
 
 ## Related documentation
 
