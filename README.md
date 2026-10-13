@@ -58,6 +58,17 @@ npm run dev               # http://localhost:5173
 
 The dev server proxies `/api` to `http://localhost:5000`.
 
+## Views
+
+The dashboard has two tabs over the same loaded graph:
+
+- **Knowledge Graph** — the interactive D3 map (zoom, pan, drag, select) with reversible filters
+  (scope, node type, relationship type, directory, focus).
+- **Execution Flows** — call-based pipelines derived client-side from `CALLS` edges
+  (`deriveExecutionFlows`), animated step by step with Play/Pause.
+
+Both read the graph already in memory; switching tabs issues no extra request.
+
 ## REST API
 
 | Method | Path                             | Description                                   |
@@ -100,7 +111,7 @@ npm run build              # tsc -p tsconfig.build.json (dist/ excludes tests)
 
 # frontend (Vitest + Testing Library)
 cd frontend
-npm test                   # 4 files / 14 tests: filters, panel interactions
+npm test                   # 5 files / 18 tests: filters, execution flows, panel interactions
 npx tsc -p tsconfig.json --noEmit
 npm run build
 ```
@@ -113,7 +124,7 @@ The Neo4j round-trip test is **gated**: it runs when Neo4j is reachable and skip
   edge was found (`derived` | `resolved` | `name-match`).
 - File nodes carry a `category` and an `inDefaultScope` flag; the UI filters (scope, node type,
   relationship type, directory, focus) are reversible and never delete graph data.
-- The interface uses a dark technical theme.
+- The interface uses a monochrome black-and-white theme.
 
 See [`docs/graph-model.md`](docs/graph-model.md), [`docs/build-logs/`](docs/build-logs/README.md),
 and [`docs/diagrams/`](docs/diagrams/README.md).

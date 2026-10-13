@@ -117,5 +117,7 @@ The prototype is covered by an automated test suite and three quality gates:
 - **Relevance scope** — `classify.utils` + `scope.service` annotate every node with a `category`
   (File nodes) and `inDefaultScope` flag; the frontend filters are reversible and never delete
   graph data.
-- **Dark UI** — the interface uses a near-black navy theme with a restrained cyan accent and a
-  selection-only glow.
+- **Monochrome UI** — the interface uses a near-black, black-and-white theme with per-type node
+  colours and a selection-only glow.
+- **Execution flows** — the frontend derives call-based pipelines (`deriveExecutionFlows`) from
+  `CALLS` edges and renders them as an animated step-by-step view.

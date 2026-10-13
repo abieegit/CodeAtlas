@@ -5,11 +5,11 @@
 | Unique file name | `build-02-kg-relevance-ui.md` |
 | Build number | 02 |
 | Build name | kg-relevance-ui |
-| Status | Open |
+| Status | Closed |
 | Date opened | 2026-10-11 |
-| Date closed | — (open) |
+| Date closed | 2026-10-13 |
 | Author | Muhammad Abdullah (47618) |
-| Scope | F1 — knowledge-graph fundamentals, relevance-based scope, dark visual identity, tests |
+| Scope | F1 — knowledge-graph fundamentals, relevance-based scope, monochrome visual identity, execution-flows view, tests |
 
 ---
 
@@ -65,14 +65,22 @@ types preserved; API paths and response shape preserved (extended only).
   kept. Directories are in scope when they contain an in-scope file.
 - These are **properties**, not deletions: Neo4j and the API always return every file.
 
-**Dark technical interface + reversible filters**
-- Near-black navy background, lighter panels, thin borders, 3–6 px radii, restrained cyan accent,
-  per-type node colours; a subtle glow on the selected node only.
+**Monochrome interface + reversible filters**
+- Near-black background, neutral panels, thin borders, 3–6 px radii, a white accent, and per-type
+  node colours; a subtle glow on the selected node only.
 - `graphFilters.ts` (pure) + `FilterPanel.tsx`: scope (Application ↔ Full), node type, relationship
   type, directory, and focus-selected-plus-neighbours. All reversible; nothing is deleted.
 
+**Execution-flows view**
+- `executionFlows.ts` (pure `deriveExecutionFlows`) derives call-based execution paths from the
+  graph: entry points are functions/methods called by nothing, following `CALLS` edges to a leaf
+  (depth ≤ 8, cycle-safe, capped at 80 flows; branches become separate flows).
+- `ExecutionFlowsView.tsx` renders each flow as an animated left-to-right pipeline (steps pulse,
+  connectors animate, with Play/Pause), reached from an **Execution Flows** header tab beside the
+  Knowledge Graph. Purely client-side — it reads the already-loaded graph, no extra request.
+
 **Reliability & hygiene**
-- Automated test suite: backend (8 files / 48 tests) and frontend (4 files / 14 tests).
+- Automated test suite: backend (8 files / 48 tests) and frontend (5 files / 18 tests).
 - `GET /api/repositories/analyze` now returns `categoryCounts` alongside the graph.
 - Extraction directories are cleaned up per request (`finally`) and purged at startup, unless
   `KEEP_EXTRACTED=true`.
@@ -170,7 +178,9 @@ Dev server port 5173; `/api` proxied to `:5000`.
 **Frontend rendering** — `App` computes `filterGraph(graph, filters)` (`useMemo`) and passes the
 filtered result to the D3 `GraphView`; `FilterPanel` changes scope/node-type/relationship-type/
 directory/focus reversibly. `DetailsPanel` shows type, category, file, line range and each
-in/out relationship with its evidence.
+in/out relationship with its evidence. A header tab switches between the **Knowledge Graph** and
+the **Execution Flows** view; the latter derives call pipelines client-side
+(`deriveExecutionFlows`) from the already-loaded graph (no extra request).
 
 **Tests** — `cd backend && npm test` (Vitest; the Neo4j round-trip test runs live or skips);
 `cd frontend && npm test` (Vitest + jsdom + Testing Library).
@@ -222,9 +232,10 @@ The shape is otherwise unchanged, so existing consumers keep working.
   (valid ZIP accepted; mislabeled ZIP and `.rar` rejected), pipeline over 10 fixtures (imports,
   calls, inheritance, duplicate-names, unresolved, unsupported, empty, arrow-functions, relevance),
   module-resolver, classify, scope, graph-builder, and a **gated live Neo4j round-trip**.
-- **Frontend tests:** `npm test` → **4 files / 14 tests, all passing** — `filterGraph` (scope,
-  node type, relationship type, directory, focus, plus a 5 000-node graph), `DetailsPanel`
-  (evidence shown; click selects), `UploadPanel` (file → analyze), `FilterPanel` (toggles).
+- **Frontend tests:** `npm test` → **5 files / 18 tests, all passing** — `filterGraph` (scope,
+  node type, relationship type, directory, focus, plus a 5 000-node graph), `deriveExecutionFlows`
+  (call chain, branching, cycle termination, no callables), `DetailsPanel` (evidence shown; click
+  selects), `UploadPanel` (file → analyze), `FilterPanel` (toggles).
 - **Type-check:** `npm run typecheck` (backend) and `tsc -p tsconfig.json --noEmit` (frontend) —
   clean. **Build:** `npm run build` on both — clean; `dist/` excludes tests/fixtures.
 - **Live Neo4j round-trip:** analysing the `inheritance` fixture and reading it back returned the
@@ -281,6 +292,6 @@ The shape is otherwise unchanged, so existing consumers keep working.
 
 | | |
 | --- | --- |
-| Build opened by | Muhammad Abdullah |
-| Date opened | 2026-10-11 |
-| Status | Open — closes when Build 03 begins |
+| Build closed by | Muhammad Abdullah |
+| Date closed | 2026-10-13 |
+| Next build | 03 (to be named at the next major update) |
