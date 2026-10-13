@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
 
-import { defaultFilters, filterGraph } from "./graphFilters";
+import {
+    defaultFilters,
+    filterGraph,
+    hiddenReasons,
+    isNodeVisible,
+    revealNodeInFilters
+} from "./graphFilters";
 
-import type { EntityType, GraphData } from "./types";
+import type { EntityType, GraphData, GraphNode } from "./types";
 
 const graph: GraphData = {
     nodes: [
@@ -156,5 +162,112 @@ describe("filterGraph", () => {
         const result = filterGraph(big, defaultFilters());
 
         expect(result.nodes).toHaveLength(2500);
+    });
+});
+
+describe("search visibility helpers", () => {
+
+    const testNode = (id: string): GraphNode =>
+        graph.nodes.find((node) => node.id === id) as GraphNode;
+
+    it("reports visible nodes as visible", () => {
+        expect(
+            isNodeVisible(graph, defaultFilters(), "file:src/app.ts")
+        ).toBe(true);
+        expect(
+            hiddenReasons(graph, defaultFilters(), testNode("file:src/app.ts"))
+        ).toEqual([]);
+    });
+
+    it("reports out-of-scope nodes as hidden by scope", () => {
+        const node = testNode("file:src/app.test.ts");
+
+        expect(isNodeVisible(graph, defaultFilters(), node.id)).toBe(false);
+        expect(hiddenReasons(graph, defaultFilters(), node)).toEqual([
+            "scope"
+        ]);
+    });
+
+    it("reports type-filtered nodes as hidden by node-type", () => {
+        const filters = {
+            ...defaultFilters(),
+            nodeTypes: ["File"] as EntityType[]
+        };
+        const node = testNode("function:src/app.ts:run");
+
+        expect(isNodeVisible(graph, filters, node.id)).toBe(false);
+        expect(hiddenReasons(graph, filters, node)).toEqual(["node-type"]);
+    });
+
+    it("reports directory- and focus-filtered nodes", () => {
+        const outside = testNode("repository:demo");
+
+        const directoryFilters = {
+            ...defaultFilters(),
+            scope: "full" as const,
+            directory: "src"
+        };
+        expect(hiddenReasons(graph, directoryFilters, outside)).toEqual([
+            "directory"
+        ]);
+
+        const focusFilters = {
+            ...defaultFilters(),
+            scope: "full" as const,
+            focusNodeId: "file:src/app.ts"
+        };
+        expect(hiddenReasons(graph, focusFilters, outside)).toEqual([
+            "focus"
+        ]);
+    });
+
+    it("revealNodeInFilters makes a hidden node visible with minimal changes", () => {
+        const node = testNode("file:src/app.test.ts");
+        const filters = defaultFilters();
+
+        const revealed = revealNodeInFilters(graph, filters, node);
+
+        expect(revealed.scope).toBe("full");
+        expect(revealed.nodeTypes).toEqual(filters.nodeTypes);
+        expect(revealed.directory).toBeNull();
+        expect(revealed.focusNodeId).toBeNull();
+        expect(isNodeVisible(graph, revealed, node.id)).toBe(true);
+    });
+
+    it("revealNodeInFilters re-enables a disabled node type", () => {
+        const node = testNode("function:src/app.ts:run");
+        const filters = {
+            ...defaultFilters(),
+            nodeTypes: ["File"] as EntityType[]
+        };
+
+        const revealed = revealNodeInFilters(graph, filters, node);
+
+        expect(revealed.nodeTypes).toContain("Function");
+        expect(revealed.nodeTypes).toContain("File");
+        expect(isNodeVisible(graph, revealed, node.id)).toBe(true);
+    });
+
+    it("revealNodeInFilters keeps the original filters untouched", () => {
+        const node = testNode("file:src/app.test.ts");
+        const filters = defaultFilters();
+
+        revealNodeInFilters(graph, filters, node);
+
+        expect(filters.scope).toBe("application");
+    });
+
+    it("revealNodeInFilters keeps a focus filter when the node is adjacent", () => {
+        const node = testNode("file:src/app.test.ts");
+        const filters = {
+            ...defaultFilters(),
+            scope: "full" as const,
+            focusNodeId: "file:src/app.ts"
+        };
+
+        const revealed = revealNodeInFilters(graph, filters, node);
+
+        expect(revealed.focusNodeId).toBe("file:src/app.ts");
+        expect(isNodeVisible(graph, revealed, node.id)).toBe(true);
     });
 });

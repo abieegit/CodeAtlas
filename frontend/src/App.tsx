@@ -6,6 +6,7 @@ import ExecutionFlowsView from "./components/ExecutionFlowsView";
 import FilterPanel from "./components/FilterPanel";
 import GraphView, { type GraphViewHandle } from "./components/GraphView";
 import Legend from "./components/Legend";
+import SearchPanel from "./components/SearchPanel";
 import UploadPanel from "./components/UploadPanel";
 import {
     defaultFilters,
@@ -30,6 +31,20 @@ export default function App() {
     const handleSelect = useCallback((node: GraphNode | null) => {
         setSelected(node);
     }, []);
+
+    const handleSearchSelect = useCallback((node: GraphNode) => {
+        setSelected(node);
+        graphViewRef.current?.revealNode(node.id);
+    }, []);
+
+    const handleSearchReveal = useCallback(
+        (nextFilters: FilterState, node: GraphNode) => {
+            setFilters(nextFilters);
+            setSelected(node);
+            graphViewRef.current?.revealNode(node.id);
+        },
+        []
+    );
 
     const handleAnalyze = useCallback(async (file: File) => {
 
@@ -154,6 +169,13 @@ export default function App() {
 
                     {graph && view === "graph" && (
                         <>
+                            <SearchPanel
+                                graph={graph}
+                                filters={filters}
+                                onSelectResult={handleSearchSelect}
+                                onRevealResult={handleSearchReveal}
+                            />
+
                             <div className="flex items-center gap-2">
                                 <button
                                     className="rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:border-white hover:text-white"
