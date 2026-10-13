@@ -2,6 +2,12 @@ import * as d3 from "d3";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 import {
+    ARCH_ICON_SHAPES,
+    archIconId,
+    classifyArchitecturalRole,
+    type ArchRole
+} from "../archRoles";
+import {
     fitTransformForGraph,
     recordPositions,
     seedPositions,
@@ -37,10 +43,12 @@ interface Props {
      * value keeps coordinates and the current viewport across re-renders.
      */
     layoutKey: string;
+    /** Show the experimental architectural icon overlay. */
+    showIcons?: boolean;
 }
 
 const GraphView = forwardRef<GraphViewHandle, Props>(function GraphView(
-    { graph, selectedId, onSelect, layoutKey },
+    { graph, selectedId, onSelect, layoutKey, showIcons = false },
     ref
 ) {
 
@@ -227,8 +235,9 @@ const GraphView = forwardRef<GraphViewHandle, Props>(function GraphView(
          */
         svg.call(zoom.transform, transformRef.current);
 
-        svg.append("defs")
-            .append("marker")
+        const defs = svg.append("defs");
+
+        defs.append("marker")
             .attr("id", "codeatlas-arrow")
             .attr("viewBox", "0 -5 10 10")
             .attr("refX", 18)
@@ -239,6 +248,29 @@ const GraphView = forwardRef<GraphViewHandle, Props>(function GraphView(
             .append("path")
             .attr("d", "M0,-5L10,0L0,5")
             .attr("fill", "#52525b");
+
+        /*
+         * Architectural icon artwork, declared once and referenced with
+         * <use> so per-node rendering stays lightweight.
+         */
+        for (const role of Object.keys(ARCH_ICON_SHAPES) as ArchRole[]) {
+            const symbol = defs
+                .append("symbol")
+                .attr("id", archIconId(role))
+                .attr("viewBox", "0 0 24 24")
+                .attr("fill", "none")
+                .attr("stroke", "currentColor")
+                .attr("stroke-width", "2")
+                .attr("stroke-linecap", "round")
+                .attr("stroke-linejoin", "round");
+
+            for (const shape of ARCH_ICON_SHAPES[role]) {
+                const element = symbol.append(shape.tag);
+                for (const [key, value] of Object.entries(shape.attrs)) {
+                    element.attr(key, value);
+                }
+            }
+        }
 
         const nodes: SimNode[] = graph.nodes.map((node) => ({ ...node }));
 
@@ -473,6 +505,66 @@ const GraphView = forwardRef<GraphViewHandle, Props>(function GraphView(
             );
 
     }, [selectedId, graph]);
+
+    /*
+     * Architectural icon overlay. Purely visual: it adds and removes
+     * <use> badges on the existing node groups. It never restarts the
+     * simulation, never moves the viewport and never touches the graph
+     * data — toggling only re-runs this effect.
+     */
+    useEffect(() => {
+
+        const node = nodeSelection.current;
+
+        if (!node) {
+            return;
+        }
+
+        node.selectAll("g.ca-icon-badge").remove();
+
+        if (!showIcons) {
+            return;
+        }
+
+        node
+            .filter((datum) => classifyArchitecturalRole(datum) !== null)
+            .each(function appendBadge(datum) {
+
+                const role = classifyArchitecturalRole(datum);
+
+                if (!role) {
+                    return;
+                }
+
+                const radius = TYPE_RADIUS[datum.type] ?? 8;
+
+                const badge = d3
+                    .select(this)
+                    .append("g")
+                    .attr("class", "ca-icon-badge")
+                    .attr(
+                        "transform",
+                        `translate(${radius + 5},${-(radius + 5)})`
+                    );
+
+                badge
+                    .append("circle")
+                    .attr("r", 7)
+                    .attr("fill", "#000000")
+                    .attr("stroke", "#3f3f46")
+                    .attr("stroke-width", 1);
+
+                badge
+                    .append("use")
+                    .attr("href", `#${archIconId(role)}`)
+                    .attr("x", -5)
+                    .attr("y", -5)
+                    .attr("width", 10)
+                    .attr("height", 10)
+                    .attr("color", "#ffffff");
+            });
+
+    }, [showIcons, graph, layoutKey]);
 
     return <svg ref={svgRef} className="h-full w-full" />;
 });

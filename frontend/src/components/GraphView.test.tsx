@@ -51,9 +51,26 @@ const clock = vi.hoisted(() => {
 function node(
     id: string,
     type: GraphNode["type"],
-    name: string
+    name: string,
+    filePath: string = `src/${name}.ts`
 ): GraphNode {
-    return { id, type, name, filePath: `src/${name}.ts`, startLine: 1, endLine: 2 };
+    return { id, type, name, filePath, startLine: 1, endLine: 2 };
+}
+
+function iconGraph(): GraphData {
+    return {
+        nodes: [
+            node("file:src/db/connection.ts", "File", "connection.ts", "src/db/connection.ts"),
+            node("file:src/utils/helpers.ts", "File", "helpers.ts", "src/utils/helpers.ts"),
+            node(
+                "function:src/integrations/webhooks.ts:sendWebhook",
+                "Function",
+                "sendWebhook",
+                "src/integrations/webhooks.ts"
+            )
+        ],
+        relationships: []
+    };
 }
 
 function chainGraph(): GraphData {
@@ -403,5 +420,118 @@ describe("GraphView imperative actions", () => {
         // The revealed node is horizontally centred in the 900px viewport.
         const centreX = zoom.k * target!.x + zoom.x;
         expect(centreX).toBeCloseTo(450, 0);
+    });
+});
+
+describe("GraphView architectural icon overlay", () => {
+
+    it("renders no icons while the overlay is off", () => {
+        const { container } = render(
+            <GraphView
+                graph={iconGraph()}
+                selectedId={null}
+                onSelect={vi.fn()}
+                layoutKey="repo-a"
+                showIcons={false}
+            />
+        );
+
+        advance(50);
+
+        expect(container.querySelectorAll("use")).toHaveLength(0);
+        // The reusable artwork is declared even when unused.
+        expect(
+            container.querySelectorAll("symbol[id^='ca-icon-']").length
+        ).toBeGreaterThan(0);
+    });
+
+    it("renders icons only for classified nodes and restores the original look", () => {
+        const { container, rerender } = render(
+            <GraphView
+                graph={iconGraph()}
+                selectedId={null}
+                onSelect={vi.fn()}
+                layoutKey="repo-a"
+                showIcons
+            />
+        );
+
+        advance(50);
+
+        // database + external are classified; helpers.ts stays plain.
+        expect(container.querySelectorAll("use")).toHaveLength(2);
+
+        rerender(
+            <GraphView
+                graph={iconGraph()}
+                selectedId={null}
+                onSelect={vi.fn()}
+                layoutKey="repo-a"
+                showIcons={false}
+            />
+        );
+
+        expect(container.querySelectorAll("use")).toHaveLength(0);
+        expect(
+            container.querySelectorAll("g.ca-icon-badge")
+        ).toHaveLength(0);
+    });
+
+    it("toggling icons preserves the viewport, node positions and graph data", () => {
+        const graph = iconGraph();
+        const graphSnapshot = JSON.stringify(graph);
+        // Stable callbacks: a new onSelect identity would legitimately
+        // re-run the main effect; the toggle itself must not.
+        const onSelect = vi.fn();
+
+        const { container, rerender } = render(
+            <GraphView
+                graph={graph}
+                selectedId={null}
+                onSelect={onSelect}
+                layoutKey="repo-a"
+                showIcons={false}
+            />
+        );
+
+        advanceLong(15000);
+
+        const zoomBefore = zoomStateOf(container);
+        const nodeBefore = nodeTransform(container, "connection.ts");
+        expect(nodeBefore).not.toBeNull();
+
+        rerender(
+            <GraphView
+                graph={graph}
+                selectedId={null}
+                onSelect={onSelect}
+                layoutKey="repo-a"
+                showIcons
+            />
+        );
+
+        advance(100);
+
+        rerender(
+            <GraphView
+                graph={graph}
+                selectedId={null}
+                onSelect={onSelect}
+                layoutKey="repo-a"
+                showIcons={false}
+            />
+        );
+
+        advance(100);
+
+        const zoomAfter = zoomStateOf(container);
+        const nodeAfter = nodeTransform(container, "connection.ts");
+
+        expect(zoomAfter.k).toBe(zoomBefore.k);
+        expect(zoomAfter.x).toBe(zoomBefore.x);
+        expect(zoomAfter.y).toBe(zoomBefore.y);
+        expect(nodeAfter!.x).toBe(nodeBefore!.x);
+        expect(nodeAfter!.y).toBe(nodeBefore!.y);
+        expect(JSON.stringify(graph)).toBe(graphSnapshot);
     });
 });

@@ -26,6 +26,7 @@ export default function App() {
     const [busy, setBusy] = useState(false);
     const [view, setView] = useState<View>("graph");
     const [filters, setFilters] = useState<FilterState>(defaultFilters);
+    const [showIcons, setShowIcons] = useState(false);
     const graphViewRef = useRef<GraphViewHandle | null>(null);
 
     const handleSelect = useCallback((node: GraphNode | null) => {
@@ -185,7 +186,34 @@ export default function App() {
                                 >
                                     Fit graph
                                 </button>
+
+                                <button
+                                    aria-pressed={showIcons}
+                                    title="Experimental overlay: heuristic architectural icons"
+                                    className={
+                                        "rounded border px-2 py-1 text-xs " +
+                                        (showIcons
+                                            ? "border-white text-white"
+                                            : "border-neutral-800 text-neutral-300 hover:border-white hover:text-white")
+                                    }
+                                    onClick={() => setShowIcons((value) => !value)}
+                                >
+                                    Icons: {showIcons ? "On" : "Off"}
+                                </button>
                             </div>
+
+                            {showIcons && (
+                                <p
+                                    role="note"
+                                    className="rounded border border-red-900/60 bg-red-950/40 px-2 py-1 text-[10px] leading-snug text-red-400"
+                                >
+                                    Experimental: icons are heuristic guesses
+                                    from names and paths — they may be wrong,
+                                    and extra graphics can affect
+                                    readability. Visualisation only: your ZIP
+                                    and source files are never modified.
+                                </p>
+                            )}
 
                             <FilterPanel
                                 filters={filters}
@@ -231,6 +259,7 @@ export default function App() {
                                         selectedId={selected?.id ?? null}
                                         onSelect={handleSelect}
                                         layoutKey={repository || "all"}
+                                        showIcons={showIcons}
                                     />
                                 ) : (
                                     <div className="flex h-full items-center justify-center text-sm text-neutral-500">
