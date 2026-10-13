@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { analyzeArchive, loadGraph } from "./api";
 import DetailsPanel from "./components/DetailsPanel";
 import ExecutionFlowsView from "./components/ExecutionFlowsView";
 import FilterPanel from "./components/FilterPanel";
-import GraphView from "./components/GraphView";
+import GraphView, { type GraphViewHandle } from "./components/GraphView";
 import Legend from "./components/Legend";
 import UploadPanel from "./components/UploadPanel";
 import {
@@ -25,6 +25,7 @@ export default function App() {
     const [busy, setBusy] = useState(false);
     const [view, setView] = useState<View>("graph");
     const [filters, setFilters] = useState<FilterState>(defaultFilters);
+    const graphViewRef = useRef<GraphViewHandle | null>(null);
 
     const handleSelect = useCallback((node: GraphNode | null) => {
         setSelected(node);
@@ -152,12 +153,25 @@ export default function App() {
                     />
 
                     {graph && view === "graph" && (
-                        <FilterPanel
-                            filters={filters}
-                            onChange={setFilters}
-                            directories={directories}
-                            selectedId={selected?.id ?? null}
-                        />
+                        <>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    className="rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:border-white hover:text-white"
+                                    onClick={() =>
+                                        graphViewRef.current?.fitToView()
+                                    }
+                                >
+                                    Fit graph
+                                </button>
+                            </div>
+
+                            <FilterPanel
+                                filters={filters}
+                                onChange={setFilters}
+                                directories={directories}
+                                selectedId={selected?.id ?? null}
+                            />
+                        </>
                     )}
 
                     {repository && (
@@ -174,20 +188,39 @@ export default function App() {
                         <div className="flex h-full items-center justify-center text-sm text-neutral-500">
                             Upload a repository ZIP to build its knowledge graph.
                         </div>
-                    ) : view === "graph" ? (
-                        visibleGraph && visibleGraph.nodes.length > 0 ? (
-                            <GraphView
-                                graph={visibleGraph}
-                                selectedId={selected?.id ?? null}
-                                onSelect={handleSelect}
-                            />
-                        ) : (
-                            <div className="flex h-full items-center justify-center text-sm text-neutral-500">
-                                No nodes match the current filters.
-                            </div>
-                        )
                     ) : (
-                        <ExecutionFlowsView graph={graph} />
+                        <>
+                            {/*
+                             * The graph stays mounted when the flows tab is
+                             * shown so zoom, pan and node positions survive
+                             * tab switches.
+                             */}
+                            <div
+                                className={
+                                    "absolute inset-0 " +
+                                    (view === "graph" ? "" : "hidden")
+                                }
+                            >
+                                {visibleGraph &&
+                                visibleGraph.nodes.length > 0 ? (
+                                    <GraphView
+                                        ref={graphViewRef}
+                                        graph={visibleGraph}
+                                        selectedId={selected?.id ?? null}
+                                        onSelect={handleSelect}
+                                        layoutKey={repository || "all"}
+                                    />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+                                        No nodes match the current filters.
+                                    </div>
+                                )}
+                            </div>
+
+                            {view === "flows" && (
+                                <ExecutionFlowsView graph={graph} />
+                            )}
+                        </>
                     )}
                 </main>
 

@@ -1,8 +1,25 @@
 import * as d3 from "d3";
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
+import {
+    fitTransformForGraph,
+    recordPositions,
+    seedPositions,
+    PositionMap
+} from "../graphLayout";
 import { TYPE_COLORS, TYPE_RADIUS } from "../nodeStyles";
 import type { GraphData, GraphNode, RelationshipType } from "../types";
+
+export interface GraphViewHandle {
+    /** Fit the whole graph into the viewport (explicit user action). */
+    fitToView: () => void;
+    /**
+     * Centre the viewport on a node without touching the simulation.
+     * If the node is not rendered yet (e.g. filters were just changed to
+     * reveal it) the reveal is applied as soon as the node exists.
+     */
+    revealNode: (nodeId: string) => void;
+}
 
 interface SimNode extends GraphNode, d3.SimulationNodeDatum {}
 
@@ -14,9 +31,18 @@ interface Props {
     graph: GraphData;
     selectedId: string | null;
     onSelect: (node: GraphNode | null) => void;
+    /**
+     * Identity of the loaded layout (e.g. repository name). A new value
+     * starts a fresh layout (new coordinates, one auto-fit); the same
+     * value keeps coordinates and the current viewport across re-renders.
+     */
+    layoutKey: string;
 }
 
-export default function GraphView({ graph, selectedId, onSelect }: Props) {
+const GraphView = forwardRef<GraphViewHandle, Props>(function GraphView(
+    { graph, selectedId, onSelect, layoutKey },
+    ref
+) {
 
     const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -34,8 +60,106 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
         unknown
     > | null>(null);
 
+    const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(
+        null
+    );
+
+    const transformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
+
+    const simNodesRef = useRef<SimNode[]>([]);
+
+    const layoutKeyRef = useRef<string | null>(null);
+
+    const interactedRef = useRef(false);
+
+    const positionsRef = useRef<PositionMap>(new Map());
+
+    const pendingRevealRef = useRef<string | null>(null);
+
+    const setTransform = (next: d3.ZoomTransform, animate: boolean): void => {
+
+        const svgElement = svgRef.current;
+        const zoom = zoomRef.current;
+
+        if (!svgElement || !zoom) {
+            return;
+        }
+
+        const svg = d3.select(svgElement);
+
+        if (animate) {
+            svg.transition().duration(500).call(zoom.transform, next);
+        } else {
+            svg.call(zoom.transform, next);
+        }
+    };
+
+    const fitToView = (animate: boolean): void => {
+
+        const svgElement = svgRef.current;
+
+        if (!svgElement) {
+            return;
+        }
+
+        const width = svgElement.clientWidth || 900;
+        const height = svgElement.clientHeight || 640;
+
+        const fit = fitTransformForGraph(simNodesRef.current, width, height);
+
+        if (fit) {
+            setTransform(
+                d3.zoomIdentity.translate(fit.x, fit.y).scale(fit.k),
+                animate
+            );
+        }
+    };
+
+    const applyReveal = (): void => {
+
+        const nodeId = pendingRevealRef.current;
+
+        if (!nodeId) {
+            return;
+        }
+
+        const node = simNodesRef.current.find((entry) => entry.id === nodeId);
+
+        if (!node || node.x === undefined || node.y === undefined) {
+            return;
+        }
+
+        const svgElement = svgRef.current;
+
+        if (!svgElement) {
+            return;
+        }
+
+        pendingRevealRef.current = null;
+
+        const width = svgElement.clientWidth || 900;
+        const height = svgElement.clientHeight || 640;
+        const current = transformRef.current;
+        const k = Math.min(Math.max(current.k, 1), 4);
+
+        setTransform(
+            d3.zoomIdentity
+                .translate(width / 2 - k * node.x, height / 2 - k * node.y)
+                .scale(k),
+            true
+        );
+    };
+
+    useImperativeHandle(ref, () => ({
+        fitToView: () => fitToView(true),
+        revealNode: (nodeId: string) => {
+            pendingRevealRef.current = nodeId;
+            applyReveal();
+        }
+    }));
+
     /*
-     * Build the force simulation whenever the graph changes.
+     * Build the force simulation whenever the graph or layout changes.
      */
     useEffect(() => {
 
@@ -43,6 +167,16 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
 
         if (!svgElement) {
             return;
+        }
+
+        const isNewLayout = layoutKeyRef.current !== layoutKey;
+
+        layoutKeyRef.current = layoutKey;
+
+        if (isNewLayout) {
+            positionsRef.current.clear();
+            transformRef.current = d3.zoomIdentity;
+            interactedRef.current = false;
         }
 
         const svg = d3.select(svgElement);
@@ -55,12 +189,43 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
 
         const zoom = d3
             .zoom<SVGSVGElement, unknown>()
+            .extent(() => {
+                const element = svgRef.current;
+                return [
+                    [0, 0],
+                    [element?.clientWidth || 900, element?.clientHeight || 640]
+                ];
+            })
             .scaleExtent([0.15, 4])
             .on("zoom", (event) => {
                 container.attr("transform", event.transform.toString());
+                transformRef.current = event.transform;
             });
 
+        zoomRef.current = zoom;
+
+        /*
+         * User gestures mark the view as interacted; the one-time auto-fit
+         * of a fresh layout then never overrides the user's navigation.
+         * Registered BEFORE the zoom behaviour: d3-zoom's own handlers call
+         * stopImmediatePropagation, which would swallow same-type listeners
+         * registered after it.
+         */
+        const markInteracted = (): void => {
+            interactedRef.current = true;
+        };
+
+        svg.on("wheel.guard", markInteracted)
+            .on("pointerdown.guard", markInteracted)
+            .on("dblclick.guard", markInteracted);
+
         svg.call(zoom);
+
+        /*
+         * The previous viewport is restored so unrelated re-renders
+         * (e.g. filter changes on the same layout) never reset the view.
+         */
+        svg.call(zoom.transform, transformRef.current);
 
         svg.append("defs")
             .append("marker")
@@ -84,6 +249,12 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
                 type: relationship.type
             })
         );
+
+        /*
+         * Re-seed coordinates of the same layout so dragged nodes stay put
+         * and the layout does not scatter on unrelated re-renders.
+         */
+        const seeded = isNewLayout ? 0 : seedPositions(nodes, positionsRef.current);
 
         const link = container
             .append("g")
@@ -133,6 +304,10 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
             .attr("stroke-width", 3)
             .attr("paint-order", "stroke");
 
+        /*
+         * A preserved layout is only reheated gently so nodes stay close to
+         * where the user arranged them; a fresh layout runs at full strength.
+         */
         const simulation = d3
             .forceSimulation<SimNode>(nodes)
             .force(
@@ -148,7 +323,8 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
                 "center",
                 d3.forceCenter(width / 2, height / 2)
             )
-            .force("collide", d3.forceCollide().radius(24));
+            .force("collide", d3.forceCollide().radius(24))
+            .alpha(seeded > 0 ? 0.3 : 1);
 
         simulation.on("tick", () => {
 
@@ -162,6 +338,10 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
                 "transform",
                 (datum) => `translate(${datum.x ?? 0},${datum.y ?? 0})`
             );
+
+            if (pendingRevealRef.current) {
+                applyReveal();
+            }
         });
 
         const drag = d3
@@ -195,58 +375,31 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
         svg.on("click", () => onSelect(null));
 
         /*
-         * Once the layout settles, fit the whole graph into view so
-         * it is centred and fully visible on first render.
+         * A fresh layout is fitted into view exactly once, after the force
+         * simulation settles — but never over a user's navigation. This
+         * replaces the old unconditional `end` handler that reset the
+         * viewport (and re-fired after every drag reheat) ~3s in.
          */
-        const fitToView = (): void => {
-
-            if (nodes.length === 0) {
-                return;
-            }
-
-            const xs = nodes.map((datum) => datum.x ?? 0);
-            const ys = nodes.map((datum) => datum.y ?? 0);
-
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs);
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
-
-            const padding = 60;
-            const graphWidth = Math.max(maxX - minX, 1);
-            const graphHeight = Math.max(maxY - minY, 1);
-
-            const scale = Math.min(
-                1.5,
-                0.9 * Math.min(
-                    width / (graphWidth + padding * 2),
-                    height / (graphHeight + padding * 2)
-                )
-            );
-
-            const translateX = width / 2 - scale * (minX + maxX) / 2;
-            const translateY = height / 2 - scale * (minY + maxY) / 2;
-
-            svg.transition()
-                .duration(500)
-                .call(
-                    zoom.transform,
-                    d3.zoomIdentity
-                        .translate(translateX, translateY)
-                        .scale(scale)
-                );
-        };
-
-        simulation.on("end", fitToView);
+        if (isNewLayout) {
+            simulation.on("end", () => {
+                if (!interactedRef.current) {
+                    fitToView(true);
+                }
+            });
+        }
 
         nodeSelection.current = node;
         linkSelection.current = link;
+        simNodesRef.current = nodes;
+
+        applyReveal();
 
         return () => {
+            recordPositions(nodes, positionsRef.current);
             simulation.stop();
         };
 
-    }, [graph, onSelect]);
+    }, [graph, layoutKey, onSelect]);
 
     /*
      * Highlight the selected node and its direct neighbours.
@@ -322,4 +475,6 @@ export default function GraphView({ graph, selectedId, onSelect }: Props) {
     }, [selectedId, graph]);
 
     return <svg ref={svgRef} className="h-full w-full" />;
-}
+});
+
+export default GraphView;
