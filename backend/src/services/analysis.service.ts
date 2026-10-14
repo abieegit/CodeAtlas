@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 
 import { File } from "@babel/types";
@@ -81,8 +82,15 @@ export function analyzeRepository(
 
             const ast = parseFile(absoluteFilePath);
 
+            /*
+             * Function entities capture a compact source snippet so the
+             * analysis features can describe the real implementation
+             * without the uploaded ZIP.
+             */
+            const source = fs.readFileSync(absoluteFilePath, "utf8");
+
             allEntities.push(
-                ...extractEntities(ast, relativeFile)
+                ...extractEntities(ast, relativeFile, source)
             );
 
             parsedFiles.push({

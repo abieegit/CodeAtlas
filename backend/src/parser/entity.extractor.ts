@@ -27,9 +27,56 @@ function isFunctionValue(
     );
 }
 
+/**
+ * Maximum characters of source text captured per Function entity. Long
+ * function bodies are truncated; the summary feature only needs the
+ * signature and the opening logic.
+ */
+const SOURCE_SNIPPET_MAX_LENGTH = 700;
+
+/**
+ * Whitespace-collapsed, truncated source text for a node's byte range.
+ */
+function sourceSnippetOf(
+    source: string | undefined,
+    node:
+        | {
+              start?: number | null;
+              end?: number | null;
+          }
+        | null
+        | undefined
+): string | undefined {
+
+    if (
+        source === undefined ||
+        !node ||
+        node.start === null ||
+        node.start === undefined ||
+        node.end === null ||
+        node.end === undefined
+    ) {
+        return undefined;
+    }
+
+    const snippet = source
+        .slice(node.start, node.end)
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (snippet.length === 0) {
+        return undefined;
+    }
+
+    return snippet.length > SOURCE_SNIPPET_MAX_LENGTH
+        ? `${snippet.slice(0, SOURCE_SNIPPET_MAX_LENGTH)}…`
+        : snippet;
+}
+
 export function extractEntities(
     ast: File,
-    filePath: string
+    filePath: string,
+    source?: string
 ): GraphNode[] {
 
     const nodes: GraphNode[] = [];
@@ -93,7 +140,8 @@ export function extractEntities(
                 name: name,
                 filePath: filePath,
                 startLine: path.node.loc?.start.line ?? 0,
-                endLine: path.node.loc?.end.line ?? 0
+                endLine: path.node.loc?.end.line ?? 0,
+                sourceSnippet: sourceSnippetOf(source, path.node)
             });
         },
 
@@ -125,7 +173,8 @@ export function extractEntities(
                 name: id.name,
                 filePath: filePath,
                 startLine: path.node.loc?.start.line ?? 0,
-                endLine: path.node.loc?.end.line ?? 0
+                endLine: path.node.loc?.end.line ?? 0,
+                sourceSnippet: sourceSnippetOf(source, path.node.init)
             });
         },
 

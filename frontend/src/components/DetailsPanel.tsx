@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { fetchFunctionSummary } from "../api";
 
 import type {
     GraphData,
@@ -10,6 +12,8 @@ interface Props {
     graph: GraphData | null;
     node: GraphNode | null;
     onSelect: (node: GraphNode | null) => void;
+    /** Repository the node belongs to (enables AI function summaries). */
+    repository?: string;
 }
 
 function Row({ label, value }: { label: string; value: string | number }) {
@@ -23,7 +27,57 @@ function Row({ label, value }: { label: string; value: string | number }) {
     );
 }
 
-export default function DetailsPanel({ graph, node, onSelect }: Props) {
+export default function DetailsPanel({
+    graph,
+    node,
+    onSelect,
+    repository
+}: Props) {
+
+    /*
+     * Core-purpose summary for Function nodes only: fetched lazily when a
+     * function is clicked, cached by the API client per repository+node.
+     */
+    const [summary, setSummary] = useState("");
+    const [summaryError, setSummaryError] = useState("");
+    const [summaryBusy, setSummaryBusy] = useState(false);
+
+    const isFunction = node?.type === "Function";
+
+    useEffect(() => {
+
+        if (!isFunction || !node || !repository) {
+            setSummary("");
+            setSummaryError("");
+            setSummaryBusy(false);
+            return;
+        }
+
+        let cancelled = false;
+
+        setSummaryBusy(true);
+        setSummary("");
+        setSummaryError("");
+
+        fetchFunctionSummary(repository, node.id)
+            .then((result) => {
+                if (!cancelled) {
+                    setSummary(result);
+                    setSummaryBusy(false);
+                }
+            })
+            .catch((cause: unknown) => {
+                if (!cancelled) {
+                    setSummaryError((cause as Error).message);
+                    setSummaryBusy(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+
+    }, [isFunction, node, repository]);
 
     const related = useMemo(() => {
 
@@ -81,6 +135,31 @@ export default function DetailsPanel({ graph, node, onSelect }: Props) {
                 <Row label="Start line" value={node.startLine} />
                 <Row label="End line" value={node.endLine} />
             </dl>
+
+            {node.type === "Function" && repository && (
+                <>
+                    <hr className="border-neutral-800" />
+
+                    <section>
+                        <h3 className="mb-1 text-xs font-semibold uppercase text-neutral-500">
+                            Core purpose
+                        </h3>
+                        {summaryBusy ? (
+                            <p className="text-xs text-neutral-500" role="status">
+                                Analysing the function…
+                            </p>
+                        ) : summaryError !== "" ? (
+                            <p className="text-xs text-red-400" role="alert">
+                                {summaryError}
+                            </p>
+                        ) : (
+                            <p className="text-xs leading-snug text-neutral-200">
+                                {summary}
+                            </p>
+                        )}
+                    </section>
+                </>
+            )}
 
             <Related
                 title={`Outgoing (${related.outgoing.length})`}

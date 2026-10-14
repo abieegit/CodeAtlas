@@ -30,6 +30,12 @@ export interface GraphNode {
     endLine: number;
     category?: FileCategory;
     inDefaultScope?: boolean;
+    /**
+     * Compact source text of a Function entity (whitespace-collapsed,
+     * truncated). Captured at extraction time so analysis features can
+     * reason about the actual implementation without the original ZIP.
+     */
+    sourceSnippet?: string;
 }
 
 /**

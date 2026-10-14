@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { analyzeArchive, loadGraph } from "./api";
+import AnalysisReportView from "./components/AnalysisReportView";
 import DetailsPanel from "./components/DetailsPanel";
 import ExecutionFlowsView from "./components/ExecutionFlowsView";
 import FilterPanel from "./components/FilterPanel";
@@ -15,7 +16,13 @@ import {
 } from "./graphFilters";
 import type { GraphData, GraphNode } from "./types";
 
-type View = "graph" | "flows";
+type View = "graph" | "flows" | "report";
+
+const VIEWS: Array<{ id: View; label: string }> = [
+    { id: "graph", label: "Knowledge Graph" },
+    { id: "flows", label: "Execution Flows" },
+    { id: "report", label: "Analysis Report" }
+];
 
 export default function App() {
 
@@ -141,18 +148,18 @@ export default function App() {
                 </div>
 
                 <nav className="flex overflow-hidden rounded border border-neutral-800">
-                    {(["graph", "flows"] as const).map((entry) => (
+                    {VIEWS.map((entry) => (
                         <button
-                            key={entry}
+                            key={entry.id}
                             className={
                                 "px-3 py-1 text-xs font-medium " +
-                                (view === entry
+                                (view === entry.id
                                     ? "bg-white text-black"
                                     : "text-neutral-400 hover:text-white")
                             }
-                            onClick={() => setView(entry)}
+                            onClick={() => setView(entry.id)}
                         >
-                            {entry === "graph" ? "Knowledge Graph" : "Execution Flows"}
+                            {entry.label}
                         </button>
                     ))}
                 </nav>
@@ -271,6 +278,17 @@ export default function App() {
                             {view === "flows" && (
                                 <ExecutionFlowsView graph={graph} />
                             )}
+
+                            {view === "report" &&
+                                (repository !== "" ? (
+                                    <AnalysisReportView repository={repository} />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center px-6 text-center text-sm text-neutral-500">
+                                        Analyze a repository first — the
+                                        report is generated per stored
+                                        repository.
+                                    </div>
+                                ))}
                         </>
                     )}
                 </main>
@@ -281,6 +299,7 @@ export default function App() {
                             graph={visibleGraph}
                             node={selected}
                             onSelect={handleSelect}
+                            repository={repository || undefined}
                         />
                     </aside>
                 )}

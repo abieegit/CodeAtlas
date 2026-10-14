@@ -40,7 +40,13 @@ Environment (`backend/.env`):
 | `NEO4J_USERNAME` | Neo4j username                               |
 | `NEO4J_PASSWORD` | Neo4j password                               |
 | `NEO4J_DATABASE` | Database name (local default: `neo4j`)       |
-| `PORT`           | API port (default `5000`)                    |
+| `PORT`           | API port (default `5000`)                     |
+| `CMD_API_KEY`    | Command Code Provider API key (analysis features; server-side only) |
+| `CMD_ANALYSIS_MODEL` | Model id for the analysis features (default `deepseek/deepseek-v4-flash`) |
+
+> The Command Code Provider API needs a plan with API access (GOAT, Pro, Max, or the
+> pay-as-you-go Provider plan). Without it the Analysis Report tab and function summaries
+> return a clear upgrade message.
 
 Neo4j via Docker:
 
@@ -60,18 +66,21 @@ The dev server proxies `/api` to `http://localhost:5000`.
 
 ## Views
 
-The dashboard has two tabs over the same loaded graph:
+The dashboard has three tabs over the loaded repository:
 
 - **Knowledge Graph** — the interactive D3 map (zoom, pan, drag, select) with reversible filters
   (scope, node type, relationship type, directory, focus), a search bar that navigates to any
   node (offering to reveal filter-hidden results), an explicit **Fit graph** action, and an
-  optional, experimental architectural icon overlay (visualisation-only).
+  optional, experimental architectural icon overlay (visualisation-only). Selecting a
+  **Function** node shows a one-line AI "Core purpose" summary beneath its statistics.
 - **Execution Flows** — call-based pipelines derived client-side from `CALLS` edges
   (`deriveExecutionFlows`), animated step by step with Play/Pause.
+- **Analysis Report** — scalability and sustainability factors for the stored repository,
+  generated server-side through the Command Code Provider API from measured graph metrics.
 
-Both read the graph already in memory; switching tabs issues no extra request. Zoom, pan and
-dragged node positions persist across filter changes, searches, tab switches and simulation
-settle; a fresh layout is auto-fitted once, only when a different repository is loaded.
+Both graph views read the graph already in memory; switching tabs issues no extra request.
+Zoom, pan and dragged node positions persist across filter changes, searches, tab switches and
+simulation settle; a fresh layout is auto-fitted once, only when a different repository is loaded.
 
 ## REST API
 
@@ -81,7 +90,9 @@ settle; a fresh layout is auto-fitted once, only when a different repository is 
 | POST   | `/api/repositories/analyze`      | multipart `file` = repository ZIP → graph     |
 | GET    | `/api/graph`                     | Stored graph `{ nodes, relationships }`       |
 | GET    | `/api/graph?repository=<name>`   | Stored graph for one repository               |
-| GET    | `/api/repositories`              | Names of repositories with a stored graph     |
+| GET    | `/api/repositories`              | Names of repositories with a stored graph      |
+| GET    | `/api/analysis?repository=`      | Scalability & sustainability report (AI)       |
+| GET    | `/api/analysis/function`         | One-line core-purpose summary for a Function node |
 
 Example:
 
@@ -109,13 +120,13 @@ Physical filesystem paths are never exposed in the graph.
 ```bash
 # backend (Vitest + Supertest)
 cd backend
-npm test                   # 8 files / 48 tests: pipeline, resolver, scope, API, Neo4j-gated
+npm test                   # 11 files / 69 tests: pipeline, resolver, scope, API, analysis, Neo4j-gated
 npm run typecheck          # tsc --noEmit
 npm run build              # tsc -p tsconfig.build.json (dist/ excludes tests)
 
 # frontend (Vitest + Testing Library)
 cd frontend
-npm test                   # 11 files / 70 tests: viewport, search, icons, filters, panels
+npm test                   # 12 files / 78 tests: viewport, search, icons, report, panels
 npx tsc -p tsconfig.json --noEmit
 npm run build
 ```

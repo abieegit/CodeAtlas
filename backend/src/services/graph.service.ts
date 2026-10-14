@@ -82,6 +82,7 @@ export async function saveGraph(
                         endLine: $endLine,
                         category: $category,
                         inDefaultScope: $inDefaultScope,
+                        sourceSnippet: $sourceSnippet,
                         repository: $repository
                     }
                 )
@@ -95,6 +96,7 @@ export async function saveGraph(
                     endLine: node.endLine,
                     category: node.category ?? null,
                     inDefaultScope: node.inDefaultScope ?? null,
+                    sourceSnippet: node.sourceSnippet ?? null,
                     repository: repositoryName
                 }
             );
@@ -179,6 +181,10 @@ export async function fetchGraph(
                     node.inDefaultScope = properties.inDefaultScope;
                 }
 
+                if (properties.sourceSnippet) {
+                    node.sourceSnippet = properties.sourceSnippet;
+                }
+
                 return node;
             });
 
@@ -223,6 +229,91 @@ export async function fetchGraph(
             });
 
         return { nodes, relationships };
+
+    } finally {
+
+        await session.close();
+    }
+}
+
+/**
+ * Returns one node plus its direct CALLS context (who calls it, what it
+ * calls) for the function-summary feature. Null when the node does not
+ * exist in the repository.
+ */
+export async function fetchFunctionContext(
+    repositoryName: string,
+    nodeId: string
+): Promise<{
+    node: GraphNode;
+    callers: string[];
+    callees: string[];
+} | null> {
+
+    const session =
+        neo4jDriver.session({ database });
+
+    try {
+
+        const nodeResult =
+            await session.run(
+                `
+                MATCH (n:Entity {repository: $repository, id: $nodeId})
+                RETURN n
+                `,
+                { repository: repositoryName, nodeId }
+            );
+
+        if (nodeResult.records.length === 0) {
+            return null;
+        }
+
+        const properties = nodeResult.records[0].get("n").properties;
+
+        const node: GraphNode = {
+            id: properties.id,
+            type: properties.type as EntityType,
+            name: properties.name,
+            filePath: properties.filePath,
+            startLine: properties.startLine,
+            endLine: properties.endLine
+        };
+
+        if (properties.sourceSnippet) {
+            node.sourceSnippet = properties.sourceSnippet;
+        }
+
+        const contextResult =
+            await session.run(
+                `
+                MATCH (n:Entity {repository: $repository, id: $nodeId})
+                OPTIONAL MATCH (caller:Entity)-[:CALLS]->(n)
+                OPTIONAL MATCH (n)-[:CALLS]->(callee:Entity)
+                RETURN collect(caller) AS callers, collect(callee) AS callees
+                `,
+                { repository: repositoryName, nodeId }
+            );
+
+        const collect = (record: Record<string, unknown>[]): string[] => {
+            const names = new Set<string>();
+            for (const entry of record) {
+                if (entry && typeof entry === "object" && "properties" in (entry as object)) {
+                    const props = (entry as { properties?: Record<string, unknown> }).properties;
+                    if (typeof props?.name === "string") {
+                        names.add(props.name);
+                    }
+                }
+            }
+            return [...names];
+        };
+
+        const record = contextResult.records[0];
+
+        return {
+            node,
+            callers: collect(record.get("callers")),
+            callees: collect(record.get("callees"))
+        };
 
     } finally {
 

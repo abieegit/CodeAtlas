@@ -1,0 +1,101 @@
+import { fetchFunctionContext } from "../graph.service";
+
+import { chatComplete, LlmError } from "./llm.client";
+
+export interface FunctionSummary {
+    nodeId: string;
+    summary: string;
+    cached: boolean;
+}
+
+const MAX_SUMMARY_WORDS = 25;
+
+const SYSTEM_PROMPT =
+    "You explain what a single JavaScript/TypeScript function does, for a " +
+    "code knowledge-graph tooltip. Answer with ONE concise sentence of at " +
+    `most ${MAX_SUMMARY_WORDS} words: the function's core purpose. Plain ` +
+    "text only - no markdown, no quotes, no preamble. If the evidence is " +
+    "too thin, give the most likely purpose based on the name and context.";
+
+const summaries = new Map<string, string>();
+
+/**
+ * Produces (or returns the cached) one-line core-purpose summary for a
+ * Function node, grounded in its captured source snippet and CALLS
+ * context. The node must exist in the stored repository graph.
+ */
+export async function summarizeFunction(
+    repository: string,
+    nodeId: string
+): Promise<FunctionSummary> {
+
+    const cacheKey = `${repository}:${nodeId}`;
+
+    const cached = summaries.get(cacheKey);
+
+    if (cached) {
+        return { nodeId, summary: cached, cached: true };
+    }
+
+    const context = await fetchFunctionContext(repository, nodeId);
+
+    if (!context) {
+        throw new LlmError(
+            `Node ${nodeId} was not found in repository ${repository}.`,
+            404
+        );
+    }
+
+    if (context.node.type !== "Function") {
+        throw new LlmError(
+            `Node ${nodeId} is a ${context.node.type}, not a Function. ` +
+            "Summaries are only available for function nodes.",
+            400
+        );
+    }
+
+    const contextLines = [
+        `Function: ${context.node.name}`,
+        `File: ${context.node.filePath}`,
+        `Lines: ${context.node.startLine}-${context.node.endLine}`,
+        context.callers.length > 0
+            ? `Called by: ${context.callers.join(", ")}`
+            : "Called by: (nothing in the graph)",
+        context.callees.length > 0
+            ? `Calls: ${context.callees.join(", ")}`
+            : "Calls: (nothing in the graph)",
+        context.node.sourceSnippet
+            ? `Source: ${context.node.sourceSnippet}`
+            : "Source: (not captured - judge from the name and context)"
+    ];
+
+    const completion = await chatComplete(
+        [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: contextLines.join("\n") }
+        ],
+        { maxTokens: 120, temperature: 0.2 }
+    );
+
+    const summary = completion
+        .trim()
+        .replace(/^["'`]+|["'`]+$/g, "")
+        .split("\n")[0]
+        .trim();
+
+    if (summary === "") {
+        throw new LlmError(
+            "The analysis model returned an empty function summary.",
+            502
+        );
+    }
+
+    summaries.set(cacheKey, summary);
+
+    return { nodeId, summary, cached: false };
+}
+
+/** Test helper: clears the summary cache. */
+export function clearSummaryCache(): void {
+    summaries.clear();
+}

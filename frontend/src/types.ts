@@ -41,6 +41,7 @@ export interface GraphNode {
     endLine: number;
     category?: FileCategory;
     inDefaultScope?: boolean;
+    sourceSnippet?: string;
 }
 
 export interface GraphRelationship {

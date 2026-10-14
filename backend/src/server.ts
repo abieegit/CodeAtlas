@@ -13,6 +13,7 @@ import {
 } from "./utils/file.utils";
 
 import repositoryRoutes from "./routes/repository.routes";
+import analysisRoutes from "./routes/analysis.routes";
 
 /*
  * Best-effort startup hygiene: clear extraction directories left behind by
@@ -31,6 +32,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api", repositoryRoutes);
+app.use("/api", analysisRoutes);
 
 app.use(
     (_request: Request, response: Response) => {

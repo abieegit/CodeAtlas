@@ -5,9 +5,9 @@
 | Unique file name | `build-03-graph-navigation.md` |
 | Build number | 03 |
 | Build name | graph-navigation (provisional, to be confirmed at the next meeting) |
-| Status | Open |
+| Status | Closed |
 | Date opened | 2026-10-13 |
-| Date closed | — (open) |
+| Date closed | 2026-10-13 |
 | Author | Muhammad Abdullah (47618) |
 | Scope | F1 — graph search, persistent navigation, architectural icon overlay |
 
@@ -219,6 +219,6 @@ elements (`circle` + `use href="#ca-icon-<role>"`) on classified node groups.
 
 | | |
 | --- | --- |
-| Build opened by | Muhammad Abdullah |
-| Date opened | 2026-10-13 |
-| Status | Open — closes when Build 04 begins |
+| Build closed by | Muhammad Abdullah |
+| Date closed | 2026-10-13 |
+| Next build | 04 (analysis reports via the Command Code Provider API) |

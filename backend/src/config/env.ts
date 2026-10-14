@@ -25,5 +25,17 @@ export const env = {
     extractedDir: path.resolve(
         process.env.EXTRACTED_DIR ?? "extracted"
     ),
-    keepExtracted: process.env.KEEP_EXTRACTED === "true"
+    keepExtracted: process.env.KEEP_EXTRACTED === "true",
+    /*
+     * Command Code Provider API (https://commandcode.ai/docs/provider).
+     * The key lives only in backend/.env — never in source or docs.
+     */
+    cmdApi: {
+        key: process.env.CMD_API_KEY ?? "",
+        baseUrl:
+            process.env.CMD_API_BASE_URL ??
+            "https://api.commandcode.ai/provider/v1",
+        model: process.env.CMD_ANALYSIS_MODEL ?? "deepseek/deepseek-v4-flash",
+        timeoutMs: Number(process.env.CMD_API_TIMEOUT_MS ?? 60000)
+    }
 };
