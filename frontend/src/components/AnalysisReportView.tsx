@@ -12,6 +12,50 @@ const SEVERITY_STYLES: Record<string, string> = {
     low: "border-neutral-800 text-neutral-500"
 };
 
+function FactorList({
+    factors
+}: {
+    factors: AnalysisReport["scalability"]["factors"];
+}) {
+
+    if (factors.length === 0) {
+        return (
+            <p className="text-xs text-neutral-500">
+                Nothing was reported here.
+            </p>
+        );
+    }
+
+    return (
+        <ul className="flex flex-col gap-2">
+            {factors.map((factor) => (
+                <li
+                    key={factor.title}
+                    className="rounded border border-neutral-900 px-3 py-2"
+                >
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-white">
+                            {factor.title}
+                        </span>
+                        <span
+                            className={
+                                "ml-auto rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide " +
+                                (SEVERITY_STYLES[factor.severity] ??
+                                    SEVERITY_STYLES.medium)
+                            }
+                        >
+                            {factor.severity}
+                        </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-snug text-neutral-400">
+                        {factor.detail}
+                    </p>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
 function ScoreBlock({
     title,
     section
@@ -35,35 +79,30 @@ function ScoreBlock({
                 )}
             </div>
 
-            {section.factors.length === 0 ? (
+            <FactorList factors={section.factors} />
+        </section>
+    );
+}
+
+function StringList({ title, items, ordered }: { title: string; items: string[]; ordered?: boolean }) {
+
+    return (
+        <section className="flex flex-col gap-2">
+            <h2 className="text-sm font-semibold text-white">{title}</h2>
+            {items.length === 0 ? (
                 <p className="text-xs text-neutral-500">
-                    No factors were reported for this section.
+                    Nothing was reported here.
                 </p>
+            ) : ordered ? (
+                <ol className="list-inside list-decimal space-y-1 text-xs leading-snug text-neutral-400">
+                    {items.map((item) => (
+                        <li key={item}>{item}</li>
+                    ))}
+                </ol>
             ) : (
-                <ul className="flex flex-col gap-2">
-                    {section.factors.map((factor) => (
-                        <li
-                            key={factor.title}
-                            className="rounded border border-neutral-900 px-3 py-2"
-                        >
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium text-white">
-                                    {factor.title}
-                                </span>
-                                <span
-                                    className={
-                                        "ml-auto rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide " +
-                                        (SEVERITY_STYLES[factor.severity] ??
-                                            SEVERITY_STYLES.medium)
-                                    }
-                                >
-                                    {factor.severity}
-                                </span>
-                            </div>
-                            <p className="mt-1 text-xs leading-snug text-neutral-400">
-                                {factor.detail}
-                            </p>
-                        </li>
+                <ul className="list-inside list-disc space-y-1 text-xs leading-snug text-neutral-400">
+                    {items.map((item) => (
+                        <li key={item}>{item}</li>
                     ))}
                 </ul>
             )}
@@ -126,8 +165,8 @@ export default function AnalysisReportView({ repository }: Props) {
 
                 {busy && (
                     <p className="text-sm text-neutral-400" role="status">
-                        Analysing the repository graph through the Command
-                        Code Provider API — this takes a few seconds…
+                        Analysing the repository graph through the configured
+                        LLM API — this takes a few seconds…
                     </p>
                 )}
 
@@ -158,27 +197,35 @@ export default function AnalysisReportView({ repository }: Props) {
                             />
                         </div>
 
-                        {report.recommendations.length > 0 && (
-                            <section className="flex flex-col gap-2">
-                                <h2 className="text-sm font-semibold text-white">
-                                    Recommendations
-                                </h2>
-                                <ol className="list-inside list-decimal space-y-1 text-xs leading-snug text-neutral-400">
-                                    {report.recommendations.map(
-                                        (recommendation) => (
-                                            <li key={recommendation}>
-                                                {recommendation}
-                                            </li>
-                                        )
-                                    )}
-                                </ol>
-                            </section>
-                        )}
+                        <StringList
+                            title="Architectural strengths"
+                            items={report.strengths ?? []}
+                        />
+
+                        <section className="flex flex-col gap-2">
+                            <h2 className="text-sm font-semibold text-white">
+                                Risks &amp; weaknesses
+                            </h2>
+                            <FactorList factors={report.risks ?? []} />
+                        </section>
+
+                        <StringList
+                            title="Prioritized recommendations"
+                            items={report.recommendations ?? []}
+                            ordered
+                        />
+
+                        <StringList
+                            title="Assessment limitations & uncertainties"
+                            items={report.limitations ?? []}
+                        />
 
                         <p className="text-[10px] text-neutral-600">
                             Generated {report.generatedAt} by {report.model}{" "}
-                            via the Command Code Provider API, from the stored
-                            graph metrics. AI output — verify before acting.
+                            via the configured LLM API, from the stored graph
+                            metrics. AI-assisted assessment — not a guaranteed
+                            performance or security audit; verify before
+                            acting.
                         </p>
                     </div>
                 )}

@@ -41,12 +41,13 @@ Environment (`backend/.env`):
 | `NEO4J_PASSWORD` | Neo4j password                               |
 | `NEO4J_DATABASE` | Database name (local default: `neo4j`)       |
 | `PORT`           | API port (default `5000`)                     |
-| `CMD_API_KEY`    | Command Code Provider API key (analysis features; server-side only) |
-| `CMD_ANALYSIS_MODEL` | Model id for the analysis features (default `deepseek/deepseek-v4-flash`) |
+| `LLM_API_KEY`    | LLM API key for the analysis features (any OpenAI-compatible endpoint; server-side only) |
+| `LLM_API_BASE_URL` | OpenAI-compatible base URL (default `https://api.groq.com/openai/v1`) |
+| `LLM_MODEL`      | Model id for the analysis features (default `openai/gpt-oss-120b`) |
 
-> The Command Code Provider API needs a plan with API access (GOAT, Pro, Max, or the
-> pay-as-you-go Provider plan). Without it the Analysis Report tab and function summaries
-> return a clear upgrade message.
+> The analysis features call any OpenAI-compatible chat-completions endpoint
+> (default: Groq). Without an `LLM_API_KEY` the Analysis Report tab and function
+> summaries return a clear configuration message.
 
 Neo4j via Docker:
 
@@ -76,7 +77,7 @@ The dashboard has three tabs over the loaded repository:
 - **Execution Flows** — call-based pipelines derived client-side from `CALLS` edges
   (`deriveExecutionFlows`), animated step by step with Play/Pause.
 - **Analysis Report** — scalability and sustainability factors for the stored repository,
-  generated server-side through the Command Code Provider API from measured graph metrics.
+  generated server-side through an OpenAI-compatible LLM API from measured graph metrics.
 
 Both graph views read the graph already in memory; switching tabs issues no extra request.
 Zoom, pan and dragged node positions persist across filter changes, searches, tab switches and

@@ -23,7 +23,7 @@ rules, and known limitations. It is the authoritative reference for the model im
 `Function` nodes additionally carry an optional `sourceSnippet` property: the function's
 own source text, whitespace-collapsed and truncated to ~700 characters, captured from the
 file content at extraction time. It exists so the analysis features (one-line function
-summaries via the Provider API) can reason about the actual implementation without the
+summaries via an OpenAI-compatible LLM API) can reason about the actual implementation without the
 uploaded ZIP, which is deleted after analysis. It is visualization/analysis metadata only —
 node identity, relationships and graph semantics are unaffected.
 

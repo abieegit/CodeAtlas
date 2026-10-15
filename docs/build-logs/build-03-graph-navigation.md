@@ -221,4 +221,4 @@ elements (`circle` + `use href="#ca-icon-<role>"`) on classified node groups.
 | --- | --- |
 | Build closed by | Muhammad Abdullah |
 | Date closed | 2026-10-13 |
-| Next build | 04 (analysis reports via the Command Code Provider API) |
+| Next build | 04 (analysis reports via an external LLM API) |

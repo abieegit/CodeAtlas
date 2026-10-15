@@ -86,14 +86,18 @@ export interface AnalysisReport {
         verdict: string;
         factors: AnalysisFactor[];
     };
+    strengths: string[];
+    risks: AnalysisFactor[];
     recommendations: string[];
+    limitations: string[];
     model: string;
     generatedAt: string;
 }
 
 /**
  * Scalability & sustainability report for one stored repository,
- * generated server-side through the Command Code Provider API.
+ * generated server-side through the configured OpenAI-compatible
+ * LLM API.
  */
 export async function fetchAnalysisReport(
     repository: string

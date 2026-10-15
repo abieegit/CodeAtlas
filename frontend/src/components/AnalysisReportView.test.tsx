@@ -41,9 +41,21 @@ const report: AnalysisReport = {
             }
         ]
     },
+    strengths: ["Clear module boundaries.", "Consistent naming."],
+    risks: [
+        {
+            title: "Wide fan-out",
+            detail: "Hub functions are called from 8+ files.",
+            severity: "medium"
+        }
+    ],
     recommendations: ["Add unit tests.", "Split app.ts."],
-    model: "deepseek/deepseek-v4-flash",
-    generatedAt: "2026-10-13T00:00:00.000Z"
+    limitations: [
+        "Based on the stored static graph only.",
+        "No runtime or load evidence."
+    ],
+    model: "openai/gpt-oss-120b",
+    generatedAt: "2026-10-15T00:00:00.000Z"
 };
 
 const mockedFetch = vi.mocked(fetchAnalysisReport);
@@ -68,7 +80,15 @@ describe("AnalysisReportView", () => {
         expect(screen.getByText("Low coupling")).toBeInTheDocument();
         expect(screen.getByText("God file")).toBeInTheDocument();
         expect(screen.getByText("Add unit tests.")).toBeInTheDocument();
-        expect(screen.getByText(/deepseek\/deepseek-v4-flash/)).toBeInTheDocument();
+        expect(screen.getByText("Architectural strengths")).toBeInTheDocument();
+        expect(screen.getByText("Clear module boundaries.")).toBeInTheDocument();
+        expect(screen.getByText("Risks & weaknesses")).toBeInTheDocument();
+        expect(screen.getByText("Wide fan-out")).toBeInTheDocument();
+        expect(
+            screen.getByText("Assessment limitations & uncertainties")
+        ).toBeInTheDocument();
+        expect(screen.getByText("No runtime or load evidence.")).toBeInTheDocument();
+        expect(screen.getByText(/openai\/gpt-oss-120b/)).toBeInTheDocument();
     });
 
     it("shows a loading state while generating", () => {

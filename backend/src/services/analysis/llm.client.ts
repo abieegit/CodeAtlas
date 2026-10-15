@@ -1,7 +1,7 @@
 import { env } from "../../config/env";
 
 /**
- * Error thrown for any Command Code Provider API failure. `status` is the
+ * Error thrown for any analysis-LLM API failure. `status` is the
  * HTTP status the analysis controller should return to the client.
  */
 export class LlmError extends Error {
@@ -31,9 +31,9 @@ interface ChatCompletionResponse {
 }
 
 /**
- * Minimal OpenAI-compatible chat completion client for the Command Code
- * Provider API (https://commandcode.ai/docs/provider). Uses the global
- * fetch (Node 18+) — no additional dependency.
+ * Minimal OpenAI-compatible chat completion client for the analysis LLM
+ * API (currently Groq, https://console.groq.com). Uses the global fetch
+ * (Node 18+) — no additional dependency.
  */
 export async function chatComplete(
     messages: ChatMessage[],
@@ -43,11 +43,11 @@ export async function chatComplete(
     } = {}
 ): Promise<string> {
 
-    const apiKey = env.cmdApi.key;
+    const apiKey = env.llm.key;
 
     if (!apiKey) {
         throw new LlmError(
-            "The Command Code API key is not configured. Set CMD_API_KEY in backend/.env.",
+            "The LLM API key is not configured. Set LLM_API_KEY in backend/.env.",
             503
         );
     }
@@ -55,13 +55,13 @@ export async function chatComplete(
     const controller = new AbortController();
     const timeout = setTimeout(
         () => controller.abort(),
-        env.cmdApi.timeoutMs
+        env.llm.timeoutMs
     );
 
     try {
 
         const response = await fetch(
-            `${env.cmdApi.baseUrl}/chat/completions`,
+            `${env.llm.baseUrl}/chat/completions`,
             {
                 method: "POST",
                 headers: {
@@ -69,7 +69,7 @@ export async function chatComplete(
                     Authorization: `Bearer ${apiKey}`
                 },
                 body: JSON.stringify({
-                    model: env.cmdApi.model,
+                    model: env.llm.model,
                     messages,
                     temperature: options.temperature ?? 0.2,
                     max_tokens: options.maxTokens ?? 1200
@@ -89,22 +89,28 @@ export async function chatComplete(
 
             if (response.status === 401) {
                 throw new LlmError(
-                    `The Command Code API rejected the key (401): ${detail}`,
+                    `The LLM API rejected the key (401): ${detail}`,
                     502
                 );
             }
 
             if (response.status === 403) {
                 throw new LlmError(
-                    "Command Code API access is not available on this plan " +
-                    "(403). The $1 Go plan has no API access — upgrade to " +
-                    "GOAT, Pro, Max, or the pay-as-you-go Provider plan.",
+                    `The LLM API denied access for this key or plan (403): ${detail}`,
                     502
                 );
             }
 
+            if (response.status === 429) {
+                throw new LlmError(
+                    "The LLM API rate limit was reached (429). Wait a moment " +
+                    "and try again.",
+                    503
+                );
+            }
+
             throw new LlmError(
-                `Command Code API error (${response.status}): ${detail}`,
+                `LLM API error (${response.status}): ${detail}`,
                 502
             );
         }
@@ -116,7 +122,7 @@ export async function chatComplete(
 
         if (typeof content !== "string" || content.trim() === "") {
             throw new LlmError(
-                "The Command Code API returned an empty completion.",
+                "The LLM API returned an empty completion.",
                 502
             );
         }
@@ -131,13 +137,13 @@ export async function chatComplete(
 
         if ((error as Error).name === "AbortError") {
             throw new LlmError(
-                "The Command Code API request timed out.",
+                "The LLM API request timed out.",
                 504
             );
         }
 
         throw new LlmError(
-            `Could not reach the Command Code API: ${(error as Error).message}`,
+            `Could not reach the LLM API: ${(error as Error).message}`,
             502
         );
 

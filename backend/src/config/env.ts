@@ -27,15 +27,14 @@ export const env = {
     ),
     keepExtracted: process.env.KEEP_EXTRACTED === "true",
     /*
-     * Command Code Provider API (https://commandcode.ai/docs/provider).
-     * The key lives only in backend/.env — never in source or docs.
+     * LLM API used by the analysis features (currently Groq,
+     * https://console.groq.com — OpenAI-compatible wire). The key lives
+     * only in backend/.env — never in source or docs.
      */
-    cmdApi: {
-        key: process.env.CMD_API_KEY ?? "",
-        baseUrl:
-            process.env.CMD_API_BASE_URL ??
-            "https://api.commandcode.ai/provider/v1",
-        model: process.env.CMD_ANALYSIS_MODEL ?? "deepseek/deepseek-v4-flash",
-        timeoutMs: Number(process.env.CMD_API_TIMEOUT_MS ?? 60000)
+    llm: {
+        key: process.env.LLM_API_KEY ?? "",
+        baseUrl: process.env.LLM_API_BASE_URL ?? "https://api.groq.com/openai/v1",
+        model: process.env.LLM_MODEL ?? "openai/gpt-oss-120b",
+        timeoutMs: Number(process.env.LLM_API_TIMEOUT_MS ?? 60000)
     }
 };

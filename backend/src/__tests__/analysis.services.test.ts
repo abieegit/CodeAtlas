@@ -83,7 +83,7 @@ afterEach(() => {
     vi.restoreAllMocks();
     clearReportCache();
     clearSummaryCache();
-    env.cmdApi.key = process.env.CMD_API_KEY ?? "test-key";
+    env.llm.key = process.env.LLM_API_KEY ?? "test-key";
 });
 
 describe("generateRepositoryReport", () => {
@@ -96,7 +96,12 @@ describe("generateRepositoryReport", () => {
                 '"detail":"Few imports.","severity":"low"},{"title":"bad",' +
                 '"detail":""}]},"sustainability":{"score":99,"verdict":"x",' +
                 '"factors":[{"title":"No tests","detail":"test ratio is 0.",' +
-                '"severity":"high"}]},"recommendations":["Add tests."]}\n```'
+                '"severity":"high"}]},"strengths":["Clear modules","","' +
+                "Consistent naming\"],\"risks\":[{\"title\":\"Wide fan-out\"," +
+                '"detail":"Hub functions.","severity":"medium"},' +
+                '{"title":"bad","detail":""}],"recommendations":' +
+                '["Add tests."],"limitations":["Static graph only","' +
+                "No runtime evidence\"]}\n```"
             )
         );
 
@@ -109,7 +114,7 @@ describe("generateRepositoryReport", () => {
             Authorization: expect.stringContaining("Bearer ")
         });
         const body = JSON.parse(String((init as RequestInit).body));
-        expect(body.model).toBe(env.cmdApi.model);
+        expect(body.model).toBe(env.llm.model);
         expect(body.messages[1].content).toContain('"functionCount":1');
 
         expect(report.summary).toBe("Small repo.");
@@ -117,8 +122,18 @@ describe("generateRepositoryReport", () => {
         // Invalid factors are dropped, scores are clamped to 0-10.
         expect(report.scalability.factors).toHaveLength(1);
         expect(report.sustainability.score).toBe(10);
+        expect(report.strengths).toEqual([
+            "Clear modules",
+            "Consistent naming"
+        ]);
+        expect(report.risks).toHaveLength(1);
+        expect(report.risks[0].severity).toBe("medium");
         expect(report.recommendations).toEqual(["Add tests."]);
-        expect(report.model).toBe(env.cmdApi.model);
+        expect(report.limitations).toEqual([
+            "Static graph only",
+            "No runtime evidence"
+        ]);
+        expect(report.model).toBe(env.llm.model);
     });
 
     it("serves a cached report without a second API call", async () => {
@@ -133,15 +148,52 @@ describe("generateRepositoryReport", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("maps a 403 plan error to a helpful message", async () => {
+    it("maps a 403 access error to a helpful message", async () => {
         stubFetch(
-            { error: { message: "upgrade_required" } },
+            { error: { message: "api_key_permission_denied" } },
             403
         );
 
         await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
-            /Go plan has no API access/
+            /denied access/
         );
+    });
+
+    it("maps a 429 rate limit to a retriable 503", async () => {
+        stubFetch(
+            { error: { message: "Rate limit reached" } },
+            429
+        );
+
+        await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
+            /rate limit/i
+        );
+    });
+
+    it("shares one pending request for concurrent duplicate calls", async () => {
+
+        const fetchMock = vi.fn(async () => await new Promise((resolve) =>
+            setTimeout(() =>
+                resolve({
+                    ok: true,
+                    status: 200,
+                    statusText: "status",
+                    json: async () =>
+                        completion('{"summary":"S","scalability":{"score":5,' +
+                            '"factors":[]},"sustainability":{"score":5,' +
+                            '"factors":[]},"recommendations":[]}')
+                })
+            )
+        ) as unknown as Response);
+        vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+        const [first, second] = await Promise.all([
+            generateRepositoryReport("demo", graph),
+            generateRepositoryReport("demo", graph)
+        ]);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(first).toBe(second);
     });
 
     it("fails clearly when the model output is not JSON", async () => {
@@ -153,10 +205,10 @@ describe("generateRepositoryReport", () => {
     });
 
     it("fails fast when no key is configured", async () => {
-        env.cmdApi.key = "";
+        env.llm.key = "";
 
         await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
-            /CMD_API_KEY/
+            /LLM_API_KEY/
         );
     });
 });

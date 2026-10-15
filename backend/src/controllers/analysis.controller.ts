@@ -13,8 +13,8 @@ import { summarizeFunction } from "../services/analysis/function-summary.service
  * GET /api/analysis?repository=<name>
  *
  * Generates (or returns the cached) scalability & sustainability report
- * for the stored graph of one repository, using the Command Code
- * Provider API. The key never leaves the backend.
+ * for the stored graph of one repository, using the configured
+ * OpenAI-compatible LLM API. The key never leaves the backend.
  */
 export async function getAnalysisReport(
     request: Request,
