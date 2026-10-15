@@ -102,7 +102,7 @@ async function generateSummary(
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: contextLines.join("\n") }
         ],
-        { maxTokens: 120, temperature: 0.2 }
+        { maxTokens: 600, temperature: 0.2 }
     );
 
     const summary = completion

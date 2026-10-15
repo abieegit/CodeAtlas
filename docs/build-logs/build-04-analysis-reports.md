@@ -144,6 +144,31 @@ Gaps that were closed in this pass:
   is treated as exposed (it was shared in chat) and must be revoked and replaced directly
   in `backend/.env` before any live testing; Neo4j was not running during this pass.
 
+### Live verification (2026-10-15)
+
+With Neo4j running, the backend dev server up, and `openai/gpt-oss-120b` configured via
+Groq (still the pre-alignment key — **rotation is still required**, see limitations):
+
+- `GET /api/analysis?repository=class-validator` → **200** in ~4.6 s: the real model
+  produced the full six-section report for graph signature
+  `461:CALLS=377,CONTAINS=457,IMPORTS=314` — scalability 7/10 with 5 factors,
+  sustainability 6/10 with 5 factors, 5 strengths, 5 risks, 5 prioritized
+  recommendations, 2 limitations; every factor references measured metrics
+  (fan-in hotspots, import-cycle count, test-file ratio, directory sizing).
+- `GET /api/analysis/function?...&nodeId=function:src/container.ts:useContainer` →
+  **200** in ~2 s: "Sets the global IoC container and optional configuration for later
+  dependency resolution." Repeating the call was served from cache in ~4 ms with
+  `cached: true` — no second provider call.
+- A follow-up report generation after a process restart returned a fresh report in ~2.9 s
+  with the same section structure, confirming stability of the strict-JSON path.
+- One defect was found and fixed during live testing: reasoning-capable models spend the
+  bounded token budget on hidden reasoning and can return an empty `content`
+  (the first function-summary call failed with `502 empty completion`). Fix:
+  `reasoning_effort: "low"` on every completion request + the summary call's
+  `maxTokens` raised 120 → 600 (`llm.client.ts`, `function-summary.service.ts`).
+- Backend after the fix: **11 files / 71 tests passing** (incl. live Neo4j round-trip),
+  typecheck and build clean.
+
 ---
 
 ## 5. Known limitations / deferred

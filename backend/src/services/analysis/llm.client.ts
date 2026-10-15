@@ -72,7 +72,13 @@ export async function chatComplete(
                     model: env.llm.model,
                     messages,
                     temperature: options.temperature ?? 0.2,
-                    max_tokens: options.maxTokens ?? 1200
+                    max_tokens: options.maxTokens ?? 1200,
+                    /*
+                     * Reasoning-capable models (e.g. gpt-oss) otherwise
+                     * spend the token budget on hidden reasoning and can
+                     * return an empty `content` for bounded calls.
+                     */
+                    reasoning_effort: "low"
                 }),
                 signal: controller.signal
             }
