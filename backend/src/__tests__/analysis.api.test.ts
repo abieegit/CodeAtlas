@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import request from "supertest";
 
+import type { NextFunction, Request, Response } from "express";
+
 /*
  * The Neo4j layer is mocked with a small stored graph so the analysis
  * routes are exercised end-to-end without a database; the Provider API
@@ -50,6 +52,36 @@ vi.mock("../services/graph.service", () => ({
     })),
     listRepositories: vi.fn(async () => ["demo"]),
     saveGraph: vi.fn(async () => undefined)
+}));
+
+/*
+ * Build 06: authentication and ownership are mocked here so the existing
+ * analysis assertions are unchanged. The real middleware is covered by the
+ * dedicated auth/ownership tests.
+ */
+vi.mock("../middleware/auth.middleware", () => ({
+    requireAuth: (request: Request, _response: Response, next: NextFunction) => {
+        request.user = { id: "user-1", email: "user@example.com" };
+        next();
+    }
+}));
+
+vi.mock("../services/repositories.service", () => ({
+    findRepositoryForUser: vi.fn(async (id: string, userId: string) => ({
+        id,
+        user_id: userId,
+        name: id,
+        source_type: "zip",
+        status: "completed",
+        graph_persisted: true,
+        node_count: 0,
+        relationship_count: 0,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z"
+    })),
+    createRepository: vi.fn(),
+    listRepositoriesForUser: vi.fn(async () => []),
+    updateRepositoryOutcome: vi.fn(async () => undefined)
 }));
 
 import { app } from "../server";

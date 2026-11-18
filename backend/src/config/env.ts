@@ -36,5 +36,26 @@ export const env = {
         baseUrl: process.env.LLM_API_BASE_URL ?? "https://api.groq.com/openai/v1",
         model: process.env.LLM_MODEL ?? "openai/gpt-oss-120b",
         timeoutMs: Number(process.env.LLM_API_TIMEOUT_MS ?? 60000)
+    },
+    /*
+     * Supabase (Build 06): Auth user verification plus the PostgreSQL
+     * project database (profiles, repositories). The service-role key
+     * lives only in the backend and must never reach the browser.
+     */
+    supabase: {
+        url: process.env.SUPABASE_URL ?? "",
+        /*
+         * The dashboard's "Publishable key" (anon) and "Secret key"
+         * (service_role) are accepted under both the spec names and the
+         * newer dashboard names.
+         */
+        anonKey:
+            process.env.SUPABASE_ANON_KEY ??
+            process.env.SUPABASE_PUBLISHABLE_KEY ??
+            "",
+        serviceRoleKey:
+            process.env.SUPABASE_SERVICE_ROLE_KEY ??
+            process.env.SUPABASE_SECRET_KEY ??
+            ""
     }
 };

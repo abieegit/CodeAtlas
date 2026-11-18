@@ -283,7 +283,7 @@ The shape is otherwise unchanged, so existing consumers keep working.
 
 - Build-log standard & index: [`./README.md`](./README.md)
 - Graph model: [`../graph-model.md`](../graph-model.md)
-- System diagrams: [`../diagrams/`](../diagrams/README.md)
+- System diagrams: [`../diagrams/D1/`](../diagrams/D1/README.md)
 - F1 system guide: [`../../CodeAtlas_F1_System_Guide.txt`](../../CodeAtlas_F1_System_Guide.txt)
 
 ---

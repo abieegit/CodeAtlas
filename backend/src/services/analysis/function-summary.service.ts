@@ -1,6 +1,7 @@
 import { fetchFunctionContext } from "../graph.service";
 
 import { chatComplete, LlmError } from "./llm.client";
+import { env } from "../../config/env";
 
 export interface FunctionSummary {
     nodeId: string;
@@ -22,6 +23,13 @@ const SYSTEM_PROMPT =
 const summaries = new Map<string, string>();
 const inFlight = new Map<string, Promise<string>>();
 
+/*
+ * Caches are scoped to repository, node id, model id and prompt version,
+ * so re-opening a node never re-bills while a analysis pass, model switch
+ * or prompt revision produces fresh summaries.
+ */
+const PROMPT_VERSION = "v2";
+
 /**
  * Produces (or returns the cached) one-line core-purpose summary for a
  * Function node, grounded in its captured source snippet and CALLS
@@ -32,7 +40,8 @@ export async function summarizeFunction(
     nodeId: string
 ): Promise<FunctionSummary> {
 
-    const cacheKey = `${repository}:${nodeId}`;
+    const cacheKey =
+        `${repository}:${env.llm.model}:${PROMPT_VERSION}:${nodeId}`;
 
     const cached = summaries.get(cacheKey);
 
@@ -63,7 +72,8 @@ async function generateSummary(
     nodeId: string
 ): Promise<string> {
 
-    const cacheKey = `${repository}:${nodeId}`;
+    const cacheKey =
+        `${repository}:${env.llm.model}:${PROMPT_VERSION}:${nodeId}`;
 
     const context = await fetchFunctionContext(repository, nodeId);
 
@@ -127,4 +137,26 @@ async function generateSummary(
 export function clearSummaryCache(): void {
     summaries.clear();
     inFlight.clear();
+}
+
+/**
+ * Drops cached and in-flight summaries for one repository. Called when
+ * the repository is re-analyzed so changed source never serves stale
+ * core-purpose output.
+ */
+export function invalidateSummaries(repository: string): void {
+
+    const prefix = `${repository}:`;
+
+    for (const key of [...summaries.keys()]) {
+        if (key.startsWith(prefix)) {
+            summaries.delete(key);
+        }
+    }
+
+    for (const key of [...inFlight.keys()]) {
+        if (key.startsWith(prefix)) {
+            inFlight.delete(key);
+        }
+    }
 }

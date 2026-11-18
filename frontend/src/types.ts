@@ -26,6 +26,31 @@ export type ResolutionMethod =
     | "resolved"
     | "name-match";
 
+/** Where a call site sits in its function's control flow (Build 05). */
+export type BranchKind =
+    | "unconditional"
+    | "if.then"
+    | "else-if"
+    | "if.else"
+    | "case"
+    | "default"
+    | "ternary.consequent"
+    | "ternary.alternate"
+    | "try"
+    | "catch"
+    | "finally"
+    | "loop";
+
+export interface CallOccurrence {
+    callId: string;
+    line: number;
+    column?: number;
+    branch: BranchKind;
+    condition?: string;
+    awaited: boolean;
+    sequence: number;
+}
+
 export interface RelationshipEvidence {
     filePath?: string;
     line?: number;
@@ -42,6 +67,10 @@ export interface GraphNode {
     category?: FileCategory;
     inDefaultScope?: boolean;
     sourceSnippet?: string;
+    /** Build 05: declared `async`. */
+    async?: boolean;
+    /** Build 05: reachable through an `export`. */
+    exported?: boolean;
 }
 
 export interface GraphRelationship {
@@ -49,6 +78,8 @@ export interface GraphRelationship {
     target: string;
     type: RelationshipType;
     evidence?: RelationshipEvidence;
+    /** Build 05: every concrete call site behind this edge. */
+    occurrences?: CallOccurrence[];
 }
 
 export interface GraphData {

@@ -4,6 +4,8 @@ import { fetchAnalysisReport, type AnalysisReport } from "../api";
 
 interface Props {
     repository: string;
+    /** Display name; falls back to the repository id when not provided. */
+    repositoryName?: string;
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -110,7 +112,7 @@ function StringList({ title, items, ordered }: { title: string; items: string[];
     );
 }
 
-export default function AnalysisReportView({ repository }: Props) {
+export default function AnalysisReportView({ repository, repositoryName }: Props) {
 
     const [report, setReport] = useState<AnalysisReport | null>(null);
     const [error, setError] = useState("");
@@ -152,7 +154,7 @@ export default function AnalysisReportView({ repository }: Props) {
                         Analysis Report
                     </h1>
                     <span className="text-xs text-neutral-500">
-                        {repository} &middot; scalability &amp; sustainability
+                        {repositoryName ?? repository} &middot; scalability &amp; sustainability
                     </span>
                     <button
                         className="ml-auto rounded border border-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:border-white hover:text-white disabled:opacity-40"

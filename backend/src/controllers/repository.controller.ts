@@ -17,9 +17,14 @@ import {
 
 import {
     fetchGraph,
-    listRepositories,
     verifyConnection
 } from "../services/graph.service";
+
+import {
+    createRepository,
+    listRepositoriesForUser,
+    updateRepositoryOutcome
+} from "../services/repositories.service";
 
 import {
     isZipArchive,
@@ -47,12 +52,23 @@ export async function health(
 /**
  * Accepts a ZIP upload, extracts it, analyzes the repository and
  * persists the resulting graph to Neo4j.
+ *
+ * Build 06: the repository row is created first (owned by the verified
+ * user), the id becomes the unique graph/cache key, and the row's status and
+ * counts are updated when the analysis finishes.
  */
 export async function analyzeRepositoryUpload(
     request: Request,
     response: Response,
     next: NextFunction
 ): Promise<void> {
+
+    const userId = request.user?.id;
+
+    if (!userId) {
+        response.status(401).json({ error: "Missing bearer token" });
+        return;
+    }
 
     if (!request.file) {
         response.status(400).json({
@@ -95,11 +111,37 @@ export async function analyzeRepositoryUpload(
             return;
         }
 
-        const result =
-            await analyzeAndStore(
+        const repository = await createRepository(
+            userId,
+            extracted.repositoryName
+        );
+
+        let result;
+
+        try {
+
+            result = await analyzeAndStore(
                 extracted.repositoryPath,
-                extracted.repositoryName
+                extracted.repositoryName,
+                repository.id
             );
+
+        } catch (error) {
+
+            try {
+                await updateRepositoryOutcome(repository.id, userId, {
+                    status: "failed"
+                });
+            } catch (updateError) {
+                console.warn(
+                    `[repository] Could not mark ${repository.id} as failed: ${
+                        (updateError as Error).message
+                    }`
+                );
+            }
+
+            throw error;
+        }
 
         const categoryCounts: Record<string, number> = {};
 
@@ -110,8 +152,17 @@ export async function analyzeRepositoryUpload(
             }
         }
 
+        await updateRepositoryOutcome(repository.id, userId, {
+            status: "completed",
+            graphPersisted: result.persisted,
+            nodeCount: result.graph.nodes.length,
+            relationshipCount: result.graph.relationships.length
+        });
+
         response.status(201).json({
             repository: extracted.repositoryName,
+            repositoryId: repository.id,
+            status: "completed",
             persisted: result.persisted,
             nodeCount: result.graph.nodes.length,
             relationshipCount: result.graph.relationships.length,
@@ -134,8 +185,8 @@ export async function analyzeRepositoryUpload(
 }
 
 /**
- * Returns a stored graph. Optionally filtered to a single repository
- * via ?repository=<name>.
+ * Returns the stored graph of one repository the caller owns.
+ * Ownership is enforced by requireOwnedRepository before this runs.
  */
 export async function getGraph(
     request: Request,
@@ -145,12 +196,16 @@ export async function getGraph(
 
     try {
 
-        const repository =
-            typeof request.query.repository === "string"
-                ? request.query.repository
-                : undefined;
+        const repository = request.repository;
 
-        const graph = await fetchGraph(repository);
+        if (!repository) {
+            response.status(404).json({
+                error: "No stored graph was found. Analyze it first."
+            });
+            return;
+        }
+
+        const graph = await fetchGraph(repository.id);
 
         response.json(graph);
 
@@ -160,16 +215,37 @@ export async function getGraph(
     }
 }
 
+/**
+ * Lists the repositories owned by the authenticated user.
+ */
 export async function getRepositories(
-    _request: Request,
+    request: Request,
     response: Response,
     next: NextFunction
 ): Promise<void> {
 
     try {
 
+        const userId = request.user?.id;
+
+        if (!userId) {
+            response.status(401).json({ error: "Missing bearer token" });
+            return;
+        }
+
+        const repositories = await listRepositoriesForUser(userId);
+
         response.json({
-            repositories: await listRepositories()
+            repositories: repositories.map((entry) => ({
+                id: entry.id,
+                name: entry.name,
+                status: entry.status,
+                graphPersisted: entry.graph_persisted,
+                nodeCount: entry.node_count,
+                relationshipCount: entry.relationship_count,
+                createdAt: entry.created_at,
+                updatedAt: entry.updated_at
+            }))
         });
 
     } catch (error) {

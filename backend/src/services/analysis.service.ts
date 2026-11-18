@@ -17,6 +17,7 @@ import {
 
 import {
     extractRelationships,
+    RelationshipCollector,
     RelationshipContext
 } from "../parser/relationship.extractor";
 
@@ -32,15 +33,25 @@ import {
     createSymbolResolver
 } from "../parser/symbol.resolver";
 
+import { resolveModule } from "../parser/module-resolver";
+
+import { extractControlFlowUnits } from "../parser/control-flow.extractor";
+
+import { extractBoundaries } from "../parser/boundary.extractor";
+
 import {
     GraphData,
     GraphNode,
-    GraphRelationship
+    GraphRelationship,
+    UnresolvedCall
 } from "../models/graph.types";
 
 interface ParsedFile {
     context: RelationshipContext;
     ast: File;
+    source: string;
+    unresolved: UnresolvedCall[];
+    selfCalls: number[];
 }
 
 /**
@@ -97,9 +108,13 @@ export function analyzeRepository(
                 context: {
                     filePath: relativeFile,
                     absoluteFilePath,
-                    repositoryRoot
+                    repositoryRoot,
+                    source
                 },
-                ast
+                ast,
+                source,
+                unresolved: [],
+                selfCalls: []
             });
 
         } catch (error) {
@@ -138,6 +153,11 @@ export function analyzeRepository(
 
     for (const parsedFile of parsedFiles) {
 
+        const collector: RelationshipCollector = {
+            unresolved: parsedFile.unresolved,
+            selfCalls: parsedFile.selfCalls
+        };
+
         try {
 
             allRelationships.push(
@@ -145,7 +165,8 @@ export function analyzeRepository(
                     parsedFile.ast,
                     parsedFile.context,
                     allEntities,
-                    symbolResolver
+                    symbolResolver,
+                    collector
                 )
             );
 
@@ -153,6 +174,80 @@ export function analyzeRepository(
 
             console.warn(
                 `[analysis] Relationship extraction failed for ${parsedFile.context.filePath}: ${(error as Error).message}`
+            );
+        }
+    }
+
+    /*
+     * ------------------------------------------------
+     * PHASE 3b
+     * Workflow evidence (control flow + HTTP boundaries)
+     *
+     * Attached to File nodes as a bounded property so no new
+     * node or relationship type enters the graph, and every
+     * existing consumer keeps working unchanged.
+     * ------------------------------------------------
+     */
+
+    const callableIds = new Set(
+        allEntities
+            .filter(
+                (entity) =>
+                    entity.type === "Function" || entity.type === "Method"
+            )
+            .map((entity) => entity.id)
+    );
+
+    const nodesById = new Map(
+        allEntities.map((entity) => [entity.id, entity])
+    );
+
+    for (const parsedFile of parsedFiles) {
+
+        const fileNode = nodesById.get(
+            `file:${parsedFile.context.filePath}`
+        );
+
+        if (!fileNode) {
+            continue;
+        }
+
+        try {
+
+            const boundaries = extractBoundaries(
+                parsedFile.ast,
+                parsedFile.context.filePath,
+                {
+                    entityIds: callableIds,
+                    resolveImport: (specifier: string) =>
+                        resolveModule(
+                            parsedFile.context.absoluteFilePath,
+                            specifier,
+                            parsedFile.context.repositoryRoot
+                        )
+                }
+            );
+
+            fileNode.workflowEvidence = {
+                routes: boundaries.routes,
+                requests: boundaries.requests,
+                mounts: boundaries.mounts,
+                units: extractControlFlowUnits(
+                    parsedFile.ast,
+                    parsedFile.context.filePath,
+                    parsedFile.source,
+                    callableIds
+                ),
+                unresolved: parsedFile.unresolved,
+                selfCalls: parsedFile.selfCalls,
+                external: boundaries.external,
+                truncated: boundaries.truncated
+            };
+
+        } catch (error) {
+
+            console.warn(
+                `[analysis] Workflow evidence failed for ${parsedFile.context.filePath}: ${(error as Error).message}`
             );
         }
     }

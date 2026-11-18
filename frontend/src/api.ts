@@ -1,9 +1,23 @@
 import type { GraphData } from "./types";
+import type { Workflow, WorkflowListResponse } from "./workflow";
+import { supabase } from "./lib/supabase";
 
 const BASE = "/api";
 
+/**
+ * Builds the Authorization header from the current Supabase session (Build 06).
+ * The backend verifies this token; the frontend never decides authorization.
+ */
+async function authorizationHeaders(): Promise<Record<string, string>> {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export interface AnalyzeResponse {
     repository: string;
+    repositoryId?: string;
+    status?: string;
     persisted: boolean;
     nodeCount: number;
     relationshipCount: number;
@@ -21,6 +35,7 @@ export async function analyzeArchive(
         `${BASE}/repositories/analyze`,
         {
             method: "POST",
+            headers: await authorizationHeaders(),
             body: form
         }
     );
@@ -34,7 +49,17 @@ export async function analyzeArchive(
         throw new Error(message ?? "Analysis failed");
     }
 
-    return response.json();
+    const result = await response.json();
+
+    /*
+     * The stored graph changed — cached core-purpose summaries for the
+     * session are now stale, so they are dropped on every analysis.
+     */
+    summaryCache.clear();
+    workflowCache.clear();
+    refinementCache.clear();
+
+    return result;
 }
 
 export async function loadGraph(
@@ -45,7 +70,9 @@ export async function loadGraph(
         ? `?repository=${encodeURIComponent(repository)}`
         : "";
 
-    const response = await fetch(`${BASE}/graph${query}`);
+    const response = await fetch(`${BASE}/graph${query}`, {
+        headers: await authorizationHeaders()
+    });
 
     if (!response.ok) {
         throw new Error("Failed to load graph");
@@ -56,7 +83,9 @@ export async function loadGraph(
 
 export async function listRepositories(): Promise<string[]> {
 
-    const response = await fetch(`${BASE}/repositories`);
+    const response = await fetch(`${BASE}/repositories`, {
+        headers: await authorizationHeaders()
+    });
 
     if (!response.ok) {
         throw new Error("Failed to load repositories");
@@ -104,7 +133,8 @@ export async function fetchAnalysisReport(
 ): Promise<AnalysisReport> {
 
     const response = await fetch(
-        `${BASE}/analysis?repository=${encodeURIComponent(repository)}`
+        `${BASE}/analysis?repository=${encodeURIComponent(repository)}`,
+        { headers: await authorizationHeaders() }
     );
 
     if (!response.ok) {
@@ -141,7 +171,8 @@ export async function fetchFunctionSummary(
     const response = await fetch(
         `${BASE}/analysis/function?repository=` +
             `${encodeURIComponent(repository)}&nodeId=` +
-            `${encodeURIComponent(nodeId)}`
+            `${encodeURIComponent(nodeId)}`,
+        { headers: await authorizationHeaders() }
     );
 
     if (!response.ok) {
@@ -160,4 +191,115 @@ export async function fetchFunctionSummary(
     summaryCache.set(cacheKey, summary);
 
     return summary;
+}
+
+/* ---------------------------------------------------------------------
+ * Coremation (Build 05) — workflows are derived deterministically by the
+ * backend; refinement is an explicit, separate user action.
+ * ------------------------------------------------------------------ */
+
+const workflowCache = new Map<string, WorkflowListResponse>();
+const refinementCache = new Map<string, Workflow>();
+
+async function readError(
+    response: Response,
+    fallback: string
+): Promise<string> {
+    return response
+        .json()
+        .then((body) => body.error ?? fallback)
+        .catch(() => response.statusText || fallback);
+}
+
+export async function fetchWorkflows(
+    repository: string
+): Promise<WorkflowListResponse> {
+
+    const cacheKey = `${repository}:list`;
+
+    const cached = workflowCache.get(cacheKey);
+
+    if (cached) {
+        return cached;
+    }
+
+    const response = await fetch(
+        `${BASE}/workflows?repository=${encodeURIComponent(repository)}`,
+        { headers: await authorizationHeaders() }
+    );
+
+    if (!response.ok) {
+        throw new Error(await readError(response, "Could not load workflows"));
+    }
+
+    const body = (await response.json()) as WorkflowListResponse;
+
+    workflowCache.set(cacheKey, body);
+
+    return body;
+}
+
+export async function fetchWorkflow(
+    repository: string,
+    workflowId: string
+): Promise<Workflow> {
+
+    const response = await fetch(
+        `${BASE}/workflows/${encodeURIComponent(workflowId)}` +
+            `?repository=${encodeURIComponent(repository)}`,
+        { headers: await authorizationHeaders() }
+    );
+
+    if (!response.ok) {
+        throw new Error(await readError(response, "Could not load this workflow"));
+    }
+
+    return (await response.json()) as Workflow;
+}
+
+/**
+ * Requests AI wording for one workflow. Cached per repository + workflow +
+ * fingerprint so switching tabs never re-bills the provider.
+ */
+export async function refineWorkflow(
+    repository: string,
+    workflow: Workflow
+): Promise<Workflow> {
+
+    const cacheKey = [
+        repository,
+        workflow.id,
+        workflow.provenance.graphFingerprint
+    ].join("|");
+
+    const cached = refinementCache.get(cacheKey);
+
+    if (cached) {
+        return cached;
+    }
+
+    const response = await fetch(
+        `${BASE}/workflows/${encodeURIComponent(workflow.id)}/refine` +
+            `?repository=${encodeURIComponent(repository)}`,
+        {
+            method: "POST",
+            headers: await authorizationHeaders()
+        }
+    );
+
+    if (!response.ok) {
+        throw new Error(await readError(response, "Refinement failed"));
+    }
+
+    const refined = (await response.json()) as Workflow;
+
+    refinementCache.set(cacheKey, refined);
+
+    return refined;
+}
+
+/** Clears cached workflow lists and refinements (after a new analysis). */
+export function clearWorkflowCaches(): void {
+    workflowCache.clear();
+    refinementCache.clear();
 }

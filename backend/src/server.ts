@@ -14,6 +14,10 @@ import {
 
 import repositoryRoutes from "./routes/repository.routes";
 import analysisRoutes from "./routes/analysis.routes";
+import workflowRoutes from "./routes/workflow.routes";
+import authRoutes from "./routes/auth.routes";
+
+import { assertSupabaseConfigured } from "./database/supabase";
 
 /*
  * Best-effort startup hygiene: clear extraction directories left behind by
@@ -33,6 +37,8 @@ app.use(express.json());
 
 app.use("/api", repositoryRoutes);
 app.use("/api", analysisRoutes);
+app.use("/api", workflowRoutes);
+app.use("/api", authRoutes);
 
 app.use(
     (_request: Request, response: Response) => {
@@ -57,6 +63,10 @@ app.use(
 );
 
 if (require.main === module) {
+
+    /* Fail fast when Supabase is not configured (Build 06). */
+    assertSupabaseConfigured();
+
     app.listen(env.port, () => {
         console.log(
             `[server] CodeAtlas API listening on http://localhost:${env.port}`

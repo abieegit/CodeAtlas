@@ -3,44 +3,67 @@ import traverse from "@babel/traverse";
 import { File, ClassMethod } from "@babel/types";
 
 import {
+    CallOccurrence,
     GraphNode,
     GraphRelationship,
-    RelationshipEvidence
+    RelationshipEvidence,
+    UnresolvedCall
 } from "../models/graph.types";
 
 import { resolveModule } from "./module-resolver";
 
 import { SymbolResolver } from "./symbol.resolver";
 
+import {
+    branchContextOf,
+    callableSiteOf,
+    enclosingCallableId
+} from "./callable";
+
 /**
  * Everything the extractor needs to relate a parsed file back to its
- * repository: the repository-relative path (used for graph ids) and the
+ * repository: the repository-relative path (used for graph ids), the
  * physical absolute path (used for import resolution and the TypeScript
- * program).
+ * program) and, when available, the file's source text (used to record
+ * real branch conditions).
  */
 export interface RelationshipContext {
     filePath: string;
     absoluteFilePath: string;
     repositoryRoot: string;
+    source?: string;
 }
 
 /**
- * True when an initializer is a function value (`() => {}` /
- * `function () {}`) assigned to a variable, mirroring entity.extractor so
- * CONTAINS and CALLS attribute to the same Function entity.
+ * Optional out-param so callers can collect calls that could not be
+ * resolved, without changing the function's existing return shape.
  */
-function isFunctionValue(node: unknown): boolean {
+export interface RelationshipCollector {
+    unresolved: UnresolvedCall[];
+    /** Lines where a callable calls itself (kept out of the graph edges). */
+    selfCalls: number[];
+}
 
-    if (!node || typeof node !== "object") {
-        return false;
+/** Occurrences are evidence, so each edge keeps a bounded number of them. */
+const MAX_OCCURRENCES_PER_EDGE = 20;
+
+function calleeLabel(path: { node: { callee: unknown } }): string {
+
+    const callee = path.node.callee as {
+        type?: string;
+        name?: string;
+        property?: { name?: string };
+    };
+
+    if (callee?.type === "Identifier") {
+        return callee.name ?? "";
     }
 
-    const type = (node as { type?: string }).type;
+    if (callee?.type === "MemberExpression") {
+        return callee.property?.name ?? "";
+    }
 
-    return (
-        type === "ArrowFunctionExpression" ||
-        type === "FunctionExpression"
-    );
+    return "";
 }
 
 function getMethodKey(node: ClassMethod): string | null {
@@ -84,10 +107,20 @@ export function extractRelationships(
     ast: File,
     context: RelationshipContext,
     entities: GraphNode[],
-    symbolResolver: SymbolResolver
+    symbolResolver: SymbolResolver,
+    collector?: RelationshipCollector
 ): GraphRelationship[] {
 
     const relationships: GraphRelationship[] = [];
+
+    /* Source order per caller, so occurrences can be replayed in sequence. */
+    const sequenceByCaller = new Map<string, number>();
+
+    const nextSequence = (callerKey: string): number => {
+        const next = (sequenceByCaller.get(callerKey) ?? 0) + 1;
+        sequenceByCaller.set(callerKey, next);
+        return next;
+    };
 
     const fileId = `file:${context.filePath}`;
 
@@ -165,23 +198,52 @@ export function extractRelationships(
             });
         },
 
-        // Arrow / const function assigned to a variable (mirrors
-        // entity.extractor so the Function node has a containing file).
+        // Arrow / const function / hook-wrapped callback / object method.
+        // Mirrors entity.extractor so every Function node has a containing
+        // file, and CONTAINS and CALLS attribute to the same entity.
         VariableDeclarator(path) {
 
-            if (!isFunctionValue(path.node.init)) {
-                return;
-            }
+            const site = callableSiteOf(path.node, context.filePath);
 
-            const id = path.node.id;
-
-            if (id.type !== "Identifier") {
+            if (!site) {
                 return;
             }
 
             relationships.push({
                 source: fileId,
-                target: `function:${context.filePath}:${id.name}`,
+                target: site.id,
+                type: "CONTAINS",
+                evidence: derivedEvidence(path.node.loc?.start.line)
+            });
+        },
+
+        ObjectMethod(path) {
+
+            const site = callableSiteOf(path.node, context.filePath);
+
+            if (!site) {
+                return;
+            }
+
+            relationships.push({
+                source: fileId,
+                target: site.id,
+                type: "CONTAINS",
+                evidence: derivedEvidence(path.node.loc?.start.line)
+            });
+        },
+
+        ObjectProperty(path) {
+
+            const site = callableSiteOf(path.node, context.filePath);
+
+            if (!site) {
+                return;
+            }
+
+            relationships.push({
+                source: fileId,
+                target: site.id,
                 type: "CONTAINS",
                 evidence: derivedEvidence(path.node.loc?.start.line)
             });
@@ -286,56 +348,31 @@ export function extractRelationships(
 
         CallExpression(path) {
 
-            const callerPath = path.findParent(
-                (parentPath) =>
-                    parentPath.isFunctionDeclaration() ||
-                    parentPath.isClassMethod() ||
-                    (parentPath.isVariableDeclarator() &&
-                        isFunctionValue(parentPath.node.init))
+            /*
+             * Attribution: the innermost ADDRESSABLE callable. Anonymous
+             * callbacks with no owner stop the search rather than blaming a
+             * named ancestor, which previously created edges between the
+             * wrong functions.
+             */
+            const callerId = enclosingCallableId(
+                path,
+                context.filePath
             );
 
-            if (!callerPath) {
-                return;
-            }
+            const line = path.node.loc?.start.line ?? 0;
+            const column = path.node.loc?.start.column;
 
-            let callerId: string | null = null;
+            const control = branchContextOf(path, context.source ?? "");
 
-            if (callerPath.isFunctionDeclaration()) {
-
-                const functionName = callerPath.node.id?.name;
-
-                if (functionName) {
-                    callerId =
-                        `function:${context.filePath}:${functionName}`;
-                }
-            } else if (callerPath.isVariableDeclarator()) {
-
-                const id = callerPath.node.id;
-
-                if (id.type === "Identifier") {
-                    callerId =
-                        `function:${context.filePath}:${id.name}`;
-                }
-            } else if (callerPath.isClassMethod()) {
-
-                const methodName = getMethodKey(callerPath.node);
-
-                const classPath =
-                    callerPath.findParent(
-                        (parent) => parent.isClassDeclaration()
-                    );
-
-                const className =
-                    classPath && classPath.isClassDeclaration()
-                        ? classPath.node.id?.name ?? null
-                        : null;
-
-                if (methodName) {
-                    callerId = className
-                        ? `method:${context.filePath}:${className}:${methodName}`
-                        : `method:${context.filePath}:${methodName}`;
-                }
-            }
+            const occurrence: CallOccurrence = {
+                callId: `${context.filePath}:${line}:${column ?? 0}`,
+                line,
+                column,
+                branch: control.branch,
+                condition: control.condition,
+                awaited: path.parent?.type === "AwaitExpression",
+                sequence: nextSequence(callerId ?? fileId)
+            };
 
             if (!callerId) {
                 return;
@@ -354,6 +391,15 @@ export function extractRelationships(
                 );
 
             if (!targetId) {
+
+                collector?.unresolved.push({
+                    callerId,
+                    callee: calleeLabel(path),
+                    line,
+                    column,
+                    reason: "not-resolved"
+                });
+
                 return;
             }
 
@@ -363,6 +409,49 @@ export function extractRelationships(
                 );
 
             if (!targetExists) {
+
+                collector?.unresolved.push({
+                    callerId,
+                    callee: calleeLabel(path),
+                    line,
+                    column,
+                    reason: "target-not-in-graph"
+                });
+
+                return;
+            }
+
+            /*
+             * Recursion: the graph keeps no self-loop edges (an existing,
+             * tested rule), so the call is recorded as file evidence instead
+             * of being silently dropped.
+             */
+            if (targetId === callerId) {
+
+                collector?.selfCalls.push(line);
+                return;
+            }
+
+            /*
+             * One edge per caller/target (existing consumers rely on that),
+             * with every concrete call site kept on the edge as an
+             * occurrence so repeats and order survive.
+             */
+            const existing = relationships.find(
+                (relationship) =>
+                    relationship.type === "CALLS" &&
+                    relationship.source === callerId &&
+                    relationship.target === targetId
+            );
+
+            if (existing) {
+
+                const occurrences = existing.occurrences ?? [];
+
+                if (occurrences.length < MAX_OCCURRENCES_PER_EDGE) {
+                    existing.occurrences = [...occurrences, occurrence];
+                }
+
                 return;
             }
 
@@ -372,9 +461,10 @@ export function extractRelationships(
                 type: "CALLS",
                 evidence: {
                     filePath: context.filePath,
-                    line: path.node.loc?.start.line,
+                    line,
                     resolution: "resolved"
-                }
+                },
+                occurrences: [occurrence]
             });
         }
     });

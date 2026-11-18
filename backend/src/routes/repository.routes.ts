@@ -10,6 +10,9 @@ import {
 
 import { env } from "../config/env";
 
+import { requireAuth } from "../middleware/auth.middleware";
+import { requireOwnedRepository } from "../middleware/ownership.middleware";
+
 import { ensureDirectory } from "../utils/file.utils";
 
 ensureDirectory(env.uploadsDir);
@@ -23,14 +26,16 @@ const upload = multer({
 
 const router = Router();
 
+/* Health stays public; everything else requires a verified token. */
 router.get("/health", health);
 
-router.get("/repositories", getRepositories);
+router.get("/repositories", requireAuth, getRepositories);
 
-router.get("/graph", getGraph);
+router.get("/graph", requireAuth, requireOwnedRepository, getGraph);
 
 router.post(
     "/repositories/analyze",
+    requireAuth,
     upload.single("file"),
     analyzeRepositoryUpload
 );

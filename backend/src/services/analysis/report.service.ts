@@ -215,15 +215,20 @@ function signatureOf(graph: GraphData): string {
 /**
  * Generates (or returns the cached) scalability & sustainability report
  * for a stored repository graph.
+ *
+ * Build 06: the cache is keyed by the stable repository id (never the display
+ * name, which is not unique); `repositoryName` is only what the returned
+ * report and the model prompt call the repository.
  */
 export async function generateRepositoryReport(
-    repository: string,
-    graph: GraphData
+    repositoryId: string,
+    graph: GraphData,
+    repositoryName: string
 ): Promise<AnalysisReport> {
 
     const graphSignature = signatureOf(graph);
     const cacheKey =
-        `${repository}:${env.llm.model}:${PROMPT_VERSION}:${graphSignature}`;
+        `${repositoryId}:${env.llm.model}:${PROMPT_VERSION}:${graphSignature}`;
 
     const cached = reportCache.get(cacheKey);
 
@@ -237,10 +242,13 @@ export async function generateRepositoryReport(
         return pending;
     }
 
-    const request = generateReport(repository, graph, cacheKey)
-        .finally(() => {
-            inFlight.delete(cacheKey);
-        });
+    const request = generateReport(
+        repositoryName,
+        graph,
+        cacheKey
+    ).finally(() => {
+        inFlight.delete(cacheKey);
+    });
 
     inFlight.set(cacheKey, request);
 
@@ -248,13 +256,13 @@ export async function generateRepositoryReport(
 }
 
 async function generateReport(
-    repository: string,
+    repositoryName: string,
     graph: GraphData,
     cacheKey: string
 ): Promise<AnalysisReport> {
 
     const graphSignature = signatureOf(graph);
-    const digest = buildRepoDigest(repository, graph);
+    const digest = buildRepoDigest(repositoryName, graph);
 
     const completion = await chatComplete(
         [
@@ -265,7 +273,7 @@ async function generateReport(
     );
 
     const report = normalizeReport(
-        repository,
+        repositoryName,
         graphSignature,
         parseJsonCompletion<unknown>(completion)
     );
@@ -279,4 +287,25 @@ async function generateReport(
 export function clearReportCache(): void {
     reportCache.clear();
     inFlight.clear();
+}
+
+/**
+ * Drops cached and in-flight reports for one repository. Called when the
+ * repository is re-analyzed so a changed graph never serves stale output.
+ */
+export function invalidateReports(repository: string): void {
+
+    const prefix = `${repository}:`;
+
+    for (const key of [...reportCache.keys()]) {
+        if (key.startsWith(prefix)) {
+            reportCache.delete(key);
+        }
+    }
+
+    for (const key of [...inFlight.keys()]) {
+        if (key.startsWith(prefix)) {
+            inFlight.delete(key);
+        }
+    }
 }

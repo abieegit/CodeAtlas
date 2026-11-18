@@ -4,6 +4,8 @@ import * as path from "path";
 
 import request from "supertest";
 
+import type { NextFunction, Request, Response } from "express";
+
 /*
  * The Neo4j layer is mocked so these tests exercise archive validation,
  * ingestion and the response shape without writing to a database.
@@ -13,6 +15,36 @@ vi.mock("../services/graph.service", () => ({
     fetchGraph: vi.fn(async () => ({ nodes: [], relationships: [] })),
     listRepositories: vi.fn(async () => []),
     saveGraph: vi.fn(async () => undefined)
+}));
+
+/*
+ * Build 06: authentication and repository-record persistence are mocked so
+ * this test keeps exercising archive validation only. The real middleware is
+ * covered by the dedicated auth/ownership tests.
+ */
+vi.mock("../middleware/auth.middleware", () => ({
+    requireAuth: (request: Request, _response: Response, next: NextFunction) => {
+        request.user = { id: "user-1", email: "user@example.com" };
+        next();
+    }
+}));
+
+vi.mock("../services/repositories.service", () => ({
+    createRepository: vi.fn(async (userId: string, name: string) => ({
+        id: "repo-1",
+        user_id: userId,
+        name,
+        source_type: "zip",
+        status: "analyzing",
+        graph_persisted: false,
+        node_count: 0,
+        relationship_count: 0,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z"
+    })),
+    findRepositoryForUser: vi.fn(async () => null),
+    listRepositoriesForUser: vi.fn(async () => []),
+    updateRepositoryOutcome: vi.fn(async () => undefined)
 }));
 
 import { app } from "../server";

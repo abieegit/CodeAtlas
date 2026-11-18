@@ -5,27 +5,10 @@ import {
     GraphNode
 } from "../models/graph.types";
 
-/**
- * True when an initializer is a function value assigned to a variable,
- * i.e. `const x = () => {}` or `const x = function () {}`. These are
- * emitted as Function entities so modern JS/TS codebases are represented
- * (a large share of functions in real repos are declared this way).
- */
-function isFunctionValue(
-    node: unknown
-): boolean {
-
-    if (!node || typeof node !== "object") {
-        return false;
-    }
-
-    const type = (node as { type?: string }).type;
-
-    return (
-        type === "ArrowFunctionExpression" ||
-        type === "FunctionExpression"
-    );
-}
+import {
+    callableSiteOf,
+    isExportedPath
+} from "./callable";
 
 /**
  * Maximum characters of source text captured per Function entity. Long
@@ -141,40 +124,90 @@ export function extractEntities(
                 filePath: filePath,
                 startLine: path.node.loc?.start.line ?? 0,
                 endLine: path.node.loc?.end.line ?? 0,
-                sourceSnippet: sourceSnippetOf(source, path.node)
+                sourceSnippet: sourceSnippetOf(source, path.node),
+                async: Boolean(path.node.async),
+                exported: isExportedPath(path)
             });
         },
 
         // -----------------------------------------
-        // ARROW / CONST FUNCTION
+        // ARROW / CONST FUNCTION / HOOK-WRAPPED CALLBACK
         //
-        // `const name = () => {}` and
-        // `const name = function () {}` are
-        // emitted as Function entities with the
-        // same id scheme as declarations, so call
-        // edges can attribute to and from them.
+        // `const name = () => {}`,
+        // `const name = function () {}` and
+        // `const name = useCallback(() => {}, [])` are emitted as Function
+        // entities with the same id scheme as declarations, so call edges
+        // can attribute to and from them.
         // -----------------------------------------
 
         VariableDeclarator(path) {
 
-            if (!isFunctionValue(path.node.init)) {
-                return;
-            }
+            const site = callableSiteOf(path.node, filePath);
 
-            const id = path.node.id;
-
-            if (id.type !== "Identifier") {
+            if (!site) {
                 return;
             }
 
             nodes.push({
-                id: `function:${filePath}:${id.name}`,
+                id: site.id,
                 type: "Function",
-                name: id.name,
+                name: site.name,
                 filePath: filePath,
                 startLine: path.node.loc?.start.line ?? 0,
                 endLine: path.node.loc?.end.line ?? 0,
-                sourceSnippet: sourceSnippetOf(source, path.node.init)
+                sourceSnippet: sourceSnippetOf(source, site.fn),
+                async: site.isAsync,
+                exported: isExportedPath(path)
+            });
+        },
+
+        // -----------------------------------------
+        // OBJECT METHOD / OBJECT PROPERTY FUNCTION
+        //
+        // `{ handleSubmit(e) {} }` and
+        // `{ onSubmit: (e) => {} }` are addressable callables in real
+        // codebases, so they become entities too.
+        // -----------------------------------------
+
+        ObjectMethod(path) {
+
+            const site = callableSiteOf(path.node, filePath);
+
+            if (!site) {
+                return;
+            }
+
+            nodes.push({
+                id: site.id,
+                type: "Function",
+                name: site.name,
+                filePath: filePath,
+                startLine: path.node.loc?.start.line ?? 0,
+                endLine: path.node.loc?.end.line ?? 0,
+                sourceSnippet: sourceSnippetOf(source, path.node),
+                async: site.isAsync,
+                exported: isExportedPath(path)
+            });
+        },
+
+        ObjectProperty(path) {
+
+            const site = callableSiteOf(path.node, filePath);
+
+            if (!site) {
+                return;
+            }
+
+            nodes.push({
+                id: site.id,
+                type: "Function",
+                name: site.name,
+                filePath: filePath,
+                startLine: path.node.loc?.start.line ?? 0,
+                endLine: path.node.loc?.end.line ?? 0,
+                sourceSnippet: sourceSnippetOf(source, path.node.value),
+                async: site.isAsync,
+                exported: isExportedPath(path)
             });
         },
 
@@ -231,7 +264,9 @@ export function extractEntities(
                 name: name,
                 filePath: filePath,
                 startLine: path.node.loc?.start.line ?? 0,
-                endLine: path.node.loc?.end.line ?? 0
+                endLine: path.node.loc?.end.line ?? 0,
+                async: Boolean(path.node.async),
+                exported: false
             });
         }
     });

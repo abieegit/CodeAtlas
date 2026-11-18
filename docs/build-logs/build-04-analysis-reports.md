@@ -169,6 +169,38 @@ Groq (still the pre-alignment key — **rotation is still required**, see limita
 - Backend after the fix: **11 files / 71 tests passing** (incl. live Neo4j round-trip),
   typecheck and build clean.
 
+### Multi-repository & configuration audit (2026-10-15)
+
+A 12-point external audit of the Build 04 implementation found two real gaps and confirmed
+the rest by inspection, live runs, and tests:
+
+- Key handling verified: `LLM_API_KEY` is read only in `backend/src/config/env.ts`, used
+  only by the backend client, never sent to the frontend (no Authorization/secret surface
+  in `frontend/src`), and no full key string exists in any tracked file (`git grep`).
+- Model validated: single source `env.llm.model` used by both report and function
+  summaries; `openai/gpt-oss-120b` is a current supported Groq model (131K context /
+  65,536 max output / reasoning modes low-medium-high — matching the client's
+  `reasoning_effort: "low"` and token budgets of 1,800 for reports and 600 for summaries).
+- Live: new repository `audit-newrepo.zip` (53 nodes / 69 rels) uploaded via
+  `POST /api/repositories/analyze` (201, ~65 s) with zero configuration change; its report
+  (all six sections, grounded in the graph signature `53:CALLS=6,CONTAINS=52,IMPORTS=11`)
+  and the `Aboutus` function core-purpose summary succeeded from that repository's stored
+  graph only.
+- Two fixes (the only code changes of this audit):
+  1. Function summary cache keys now include the model id and prompt version, matching
+     the report cache scoping (`function-summary.service.ts`).
+  2. Explicit invalidation: a successful re-analysis (`parser.service::analyzeAndStore`)
+     now drops the affected repository's cached/in-flight reports and summaries; the
+     frontend session summary cache is cleared on every analysis (`api.ts`). The previous
+     count-based graph signature alone could serve stale output when content changed
+     without changing node/relationship counts.
+- Live invalidation proof: cached report at 24 ms → re-analysis (201) → next report call
+  re-generated against the provider in ~6.5 s with a new `generatedAt`.
+- Checks passing at audit close: backend 11 files / **73 tests** (incl. live Neo4j
+  round-trip), frontend 12 files / **78 tests**, typecheck + production builds clean on
+  both packages. Existing Build 01–03 functionality (upload/pipeline, graph, search,
+  icons, flows, Neo4j persistence) is exercised by those suites and unaffected.
+
 ---
 
 ## 5. Known limitations / deferred
@@ -199,7 +231,7 @@ Groq (still the pre-alignment key — **rotation is still required**, see limita
 
 - Build-log standard & index: [`./README.md`](./README.md)
 - Graph model (function `sourceSnippet`): [`../graph-model.md`](../graph-model.md)
-- System diagrams: [`../diagrams/`](../diagrams/README.md)
+- System diagrams: [`../diagrams/D1/`](../diagrams/D1/README.md)
 
 ---
 
@@ -209,4 +241,4 @@ Groq (still the pre-alignment key — **rotation is still required**, see limita
 | --- | --- |
 | Build opened by | Muhammad Abdullah |
 | Date opened | 2026-10-13 |
-| Status | Open — closes when Build 05 begins |
+| Status | Closed — closed by Build 05 (coremation) on 2026-10-22 |

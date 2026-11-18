@@ -43,10 +43,12 @@ import { env } from "../config/env";
 import { LlmError } from "../services/analysis/llm.client";
 import {
     clearReportCache,
-    generateRepositoryReport
+    generateRepositoryReport,
+    invalidateReports
 } from "../services/analysis/report.service";
 import {
     clearSummaryCache,
+    invalidateSummaries,
     summarizeFunction
 } from "../services/analysis/function-summary.service";
 import { buildRepoDigest } from "../services/analysis/repo-digest";
@@ -105,7 +107,7 @@ describe("generateRepositoryReport", () => {
             )
         );
 
-        const report = await generateRepositoryReport("demo", graph);
+        const report = await generateRepositoryReport("demo", graph, "demo");
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const [url, init] = fetchMock.mock.calls[0];
@@ -142,8 +144,8 @@ describe("generateRepositoryReport", () => {
                 '"sustainability":{"score":5,"factors":[]},"recommendations":[]}')
         );
 
-        await generateRepositoryReport("demo", graph);
-        await generateRepositoryReport("demo", graph);
+        await generateRepositoryReport("demo", graph, "demo");
+        await generateRepositoryReport("demo", graph, "demo");
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
@@ -154,7 +156,7 @@ describe("generateRepositoryReport", () => {
             403
         );
 
-        await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
+        await expect(generateRepositoryReport("demo", graph, "demo")).rejects.toThrow(
             /denied access/
         );
     });
@@ -165,9 +167,22 @@ describe("generateRepositoryReport", () => {
             429
         );
 
-        await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
+        await expect(generateRepositoryReport("demo", graph, "demo")).rejects.toThrow(
             /rate limit/i
         );
+    });
+
+    it("regenerates after an explicit invalidation for the repository", async () => {
+        const fetchMock = stubFetch(
+            completion('{"summary":"S","scalability":{"score":5,"factors":[]},' +
+                '"sustainability":{"score":5,"factors":[]},"recommendations":[]}')
+        );
+
+        await generateRepositoryReport("demo", graph, "demo");
+        invalidateReports("demo");
+        await generateRepositoryReport("demo", graph, "demo");
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it("shares one pending request for concurrent duplicate calls", async () => {
@@ -188,8 +203,8 @@ describe("generateRepositoryReport", () => {
         vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
         const [first, second] = await Promise.all([
-            generateRepositoryReport("demo", graph),
-            generateRepositoryReport("demo", graph)
+            generateRepositoryReport("demo", graph, "demo"),
+            generateRepositoryReport("demo", graph, "demo")
         ]);
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -199,7 +214,7 @@ describe("generateRepositoryReport", () => {
     it("fails clearly when the model output is not JSON", async () => {
         stubFetch(completion("I cannot answer that."));
 
-        await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
+        await expect(generateRepositoryReport("demo", graph, "demo")).rejects.toThrow(
             LlmError
         );
     });
@@ -207,7 +222,7 @@ describe("generateRepositoryReport", () => {
     it("fails fast when no key is configured", async () => {
         env.llm.key = "";
 
-        await expect(generateRepositoryReport("demo", graph)).rejects.toThrow(
+        await expect(generateRepositoryReport("demo", graph, "demo")).rejects.toThrow(
             /LLM_API_KEY/
         );
     });
@@ -242,6 +257,16 @@ describe("summarizeFunction", () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(second.cached).toBe(true);
+    });
+
+    it("regenerates after an explicit invalidation for the repository", async () => {
+        const fetchMock = stubFetch(completion("Rebuilt the report."));
+
+        await summarizeFunction("demo", "function:src/app.ts:run");
+        invalidateSummaries("demo");
+        await summarizeFunction("demo", "function:src/app.ts:run");
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it("rejects non-function nodes", async () => {

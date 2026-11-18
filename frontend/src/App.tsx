@@ -3,25 +3,26 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { analyzeArchive, loadGraph } from "./api";
 import AnalysisReportView from "./components/AnalysisReportView";
 import DetailsPanel from "./components/DetailsPanel";
-import ExecutionFlowsView from "./components/ExecutionFlowsView";
 import FilterPanel from "./components/FilterPanel";
 import GraphView, { type GraphViewHandle } from "./components/GraphView";
 import Legend from "./components/Legend";
 import SearchPanel from "./components/SearchPanel";
 import UploadPanel from "./components/UploadPanel";
+import CoremationView from "./components/CoremationView";
 import {
     defaultFilters,
     filterGraph,
     FilterState
 } from "./graphFilters";
 import type { GraphData, GraphNode } from "./types";
+import { useAuth } from "./auth/AuthContext";
 
-type View = "graph" | "flows" | "report";
+type View = "graph" | "report" | "coremation";
 
 const VIEWS: Array<{ id: View; label: string }> = [
     { id: "graph", label: "Knowledge Graph" },
-    { id: "flows", label: "Execution Flows" },
-    { id: "report", label: "Analysis Report" }
+    { id: "report", label: "Analysis Report" },
+    { id: "coremation", label: "Coremation" }
 ];
 
 export default function App() {
@@ -29,12 +30,22 @@ export default function App() {
     const [graph, setGraph] = useState<GraphData | null>(null);
     const [selected, setSelected] = useState<GraphNode | null>(null);
     const [repository, setRepository] = useState("");
+    const [repositoryId, setRepositoryId] = useState("");
     const [status, setStatus] = useState("");
     const [busy, setBusy] = useState(false);
     const [view, setView] = useState<View>("graph");
     const [filters, setFilters] = useState<FilterState>(defaultFilters);
     const [showIcons, setShowIcons] = useState(false);
     const graphViewRef = useRef<GraphViewHandle | null>(null);
+
+    const { user, signOut } = useAuth();
+
+    /*
+     * Build 06: the repository id is the stable handle every backend call
+     * uses; the name is only for display. Falls back to the name when an
+     * older response omits the id.
+     */
+    const repositoryKey = repositoryId || repository;
 
     const handleSelect = useCallback((node: GraphNode | null) => {
         setSelected(node);
@@ -66,6 +77,7 @@ export default function App() {
 
             setGraph(result.graph);
             setRepository(result.repository);
+            setRepositoryId(result.repositoryId ?? result.repository);
             setFilters(defaultFilters());
             setStatus(
                 `${result.repository}: ${result.nodeCount} nodes, ` +
@@ -94,7 +106,7 @@ export default function App() {
 
         try {
 
-            const stored = await loadGraph(repository || undefined);
+            const stored = await loadGraph(repositoryKey || undefined);
 
             setGraph(stored);
             setFilters(defaultFilters());
@@ -112,7 +124,7 @@ export default function App() {
             setBusy(false);
         }
 
-    }, [repository]);
+    }, [repositoryKey, repository]);
 
     const visibleGraph = useMemo(
         () => (graph ? filterGraph(graph, filters) : null),
@@ -142,9 +154,7 @@ export default function App() {
             <header className="flex items-center justify-between gap-4 border-b border-neutral-800 bg-black px-4 py-3">
                 <div>
                     <h1 className="text-lg font-semibold text-white">CodeAtlas</h1>
-                    <p className="text-xs text-neutral-500">
-                        AST-based interactive knowledge graph (F1)
-                    </p>
+                    
                 </div>
 
                 <nav className="flex overflow-hidden rounded border border-neutral-800">
@@ -164,7 +174,22 @@ export default function App() {
                     ))}
                 </nav>
 
-                <Legend />
+                <div className="flex items-center gap-3">
+                    {user?.email && (
+                        <span className="hidden max-w-[16rem] truncate text-xs text-neutral-500 sm:inline">
+                            {user.email}
+                        </span>
+                    )}
+
+                    <button
+                        className="rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:border-white hover:text-white"
+                        onClick={() => void signOut()}
+                    >
+                        Sign out
+                    </button>
+
+                    <Legend />
+                </div>
             </header>
 
             <div className="flex min-h-0 flex-1">
@@ -248,7 +273,7 @@ export default function App() {
                     ) : (
                         <>
                             {/*
-                             * The graph stays mounted when the flows tab is
+                             * The graph stays mounted when another tab is
                              * shown so zoom, pan and node positions survive
                              * tab switches.
                              */}
@@ -265,7 +290,7 @@ export default function App() {
                                         graph={visibleGraph}
                                         selectedId={selected?.id ?? null}
                                         onSelect={handleSelect}
-                                        layoutKey={repository || "all"}
+                                        layoutKey={repositoryKey || "all"}
                                         showIcons={showIcons}
                                     />
                                 ) : (
@@ -275,18 +300,27 @@ export default function App() {
                                 )}
                             </div>
 
-                            {view === "flows" && (
-                                <ExecutionFlowsView graph={graph} />
-                            )}
-
                             {view === "report" &&
                                 (repository !== "" ? (
-                                    <AnalysisReportView repository={repository} />
+                                    <AnalysisReportView
+                                        repository={repositoryKey}
+                                        repositoryName={repository}
+                                    />
                                 ) : (
                                     <div className="flex h-full items-center justify-center px-6 text-center text-sm text-neutral-500">
                                         Analyze a repository first — the
                                         report is generated per stored
                                         repository.
+                                    </div>
+                                ))}
+
+                            {view === "coremation" &&
+                                (repository !== "" ? (
+                                    <CoremationView repository={repositoryKey} />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center px-6 text-center text-sm text-neutral-500">
+                                        Analyze a repository first — workflows
+                                        are reconstructed per stored repository.
                                     </div>
                                 ))}
                         </>
@@ -299,7 +333,7 @@ export default function App() {
                             graph={visibleGraph}
                             node={selected}
                             onSelect={handleSelect}
-                            repository={repository || undefined}
+                            repository={repositoryKey || undefined}
                         />
                     </aside>
                 )}

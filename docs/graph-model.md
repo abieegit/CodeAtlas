@@ -1,9 +1,15 @@
-# CodeAtlas — Graph Data Model (F1)
+# CodeAtlas — Graph Data Model
 
-The CodeAtlas F1 knowledge graph is a typed, directed property graph stored in Neo4j. This
+The CodeAtlas knowledge graph is a typed, directed property graph stored in Neo4j. This
 document defines node identity, relationship semantics, discovery method, provenance, validation
 rules, and known limitations. It is the authoritative reference for the model implemented under
 `backend/src/parser/**` and `backend/src/services/**`.
+
+> **Build 05 note:** the model below was **extended additively**, not redesigned. The
+> node types, the four relationship types, the id scheme and every existing API response
+> are unchanged; the new material arrives as optional fields and as file-level evidence
+> (see [Build 05 additions](#build-05-additions-workflow-evidence)). That is deliberate —
+> the D3 graph, filters, search, reports and function summaries all key on the types below.
 
 ## Node types
 
@@ -13,7 +19,7 @@ rules, and known limitations. It is the authoritative reference for the model im
 | Directory | `directory:<relativePath>` | derived from file paths |
 | File | `file:<relativePath>` | for each scanned source file |
 | Class | `class:<relativePath>:<ClassName>` | `class` declaration |
-| Function | `function:<relativePath>:<Name>` | function declaration, or `const x = () => {}` / `const x = function () {}` |
+| Function | `function:<relativePath>:<Name>` | function declaration, `const x = () => {}` / `const x = function () {}`, **hook-wrapped** `const x = useCallback(() => {}, [])` / `useMemo`, and **object methods** (`{ save() {} }`, `{ save: () => {} }`) — from Build 05 |
 | Method | `method:<relativePath>:<ClassName>:<Name>` | class method |
 
 `Variable` is a reserved node type but is **not** emitted by the extractor.
@@ -69,8 +75,51 @@ Evidence is written as relationship properties in Neo4j and rebuilt by `fetchGra
 1. Nodes are de-duplicated by `id` (first wins).
 2. Directory/Repository nodes are derived and linked with `derived` `CONTAINS` edges.
 3. Edges whose `source` or `target` is not a node are dropped (dangling).
-4. Self-loops (`source === target`) are dropped.
+4. Self-loops (`source === target`) are dropped. **Build 05:** recursion is therefore not
+   an edge, but it is no longer invisible — self-call lines are recorded in the file's
+   `workflowEvidence.selfCalls` and reported as `provenance.selfCalls` on every workflow.
 5. Edges are de-duplicated by `source|type|target`; evidence on the first occurrence is kept.
+   **Build 05:** repeated call sites are merged into that one edge but retained in its
+   `occurrences` list, so ordering and repetition survive without changing the edge shape.
+
+## Build 05 additions (workflow evidence)
+
+Optional additive fields only — every one is absent-safe for pre-Build-05 graphs.
+
+| Field | Lives on | Contents |
+| --- | --- | --- |
+| `async`, `exported` | `Function`/`Method` nodes | declared modifiers, read from the AST |
+| `occurrences[]` | `CALLS` relationships | one entry per concrete call site: `callId`, `line`, `column`, `branch`, `condition`, `awaited`, `sequence` |
+| `workflowEvidence` | `File` nodes | bounded JSON: `routes`, `requests`, `mounts`, `units` (per-callable control flow), `unresolved`, `external`, `truncated` |
+
+**Control flow (`units[]`).** Per callable: `branches` with kinds
+`if.then | else-if | if.else | case | default | ternary.consequent | ternary.alternate |
+try | catch | finally | loop` and the **condition text sliced from the source**, plus
+`returns`, `throws`, `awaits`, `loops` line lists. A branch is evidence of where a call is
+*written*; it is never an edge, and the graph never claims the guarded call executes.
+
+**HTTP boundaries.** `routes[]` holds statically readable Express-style registrations
+(`method`, declared `path`, `mountPath`, `fullPath`, `handler`, resolved `handlerId`,
+`line`, `column`, `middleware[]`); `requests[]` holds client calls (`method`, `url`,
+`urlStatic`, `client`, `callerId`, `line`). Route detection requires a router-shaped
+receiver (`Router()`/`express()`-created or named `app`/`router`/`server`/`api`) **and** a
+leading-slash literal path, so `map.get(k)` and `request(app).get("/x")` are not mistaken
+for endpoints. Matching between the two is segment-wise with `:param` and `*` wildcard
+support and reports `resolved` / `ambiguous` / `unresolved` — ambiguity is preserved.
+
+**Unresolved honesty.** `unresolved[]` records calls with a caller but no resolvable
+internal target, with `reason: not-resolved | target-not-in-graph`. These are **evidence,
+not edges**: no `CALLS` edge, node or `ResolutionMethod` value is invented for them, and
+`ResolutionMethod` still has exactly `derived | resolved | name-match`.
+
+**Persistence.** All of the above round-trips through Neo4j (`workflowEvidence` JSON on
+File nodes, `occurrences` JSON on relationships, `isAsync`/`isExported` on nodes), is size
+capped on write, and is parsed defensively on read so one malformed property cannot break
+graph retrieval.
+
+**Compatibility rule.** Graphs stored before Build 05 simply lack these properties.
+Workflow reconstruction detects that and reports `provenance.evidenceVersion: "none"`;
+the remedy is an explicit re-analysis, never a silent inference.
 
 ## Known limitations
 

@@ -8,10 +8,18 @@ import type { GraphData } from "./types";
 vi.mock("./api", () => ({
     analyzeArchive: vi.fn(),
     loadGraph: vi.fn(),
-    listRepositories: vi.fn()
+    listRepositories: vi.fn(),
+    fetchAnalysisReport: vi.fn(),
+    fetchFunctionSummary: vi.fn(),
+    fetchWorkflows: vi.fn(),
+    fetchWorkflow: vi.fn(),
+    refineWorkflow: vi.fn(),
+    clearWorkflowCaches: vi.fn()
 }));
 
-const { analyzeArchive } = vi.mocked(await import("./api"));
+const { analyzeArchive, fetchWorkflows, fetchWorkflow } = vi.mocked(
+    await import("./api")
+);
 
 function makeGraph(options: { outOfScopeDb?: boolean } = {}): GraphData {
     return {
@@ -139,5 +147,144 @@ describe("App search integration", () => {
         expect(
             await screen.findByRole("heading", { name: "connection.ts" })
         ).toBeInTheDocument();
+    });
+});
+
+describe("App Coremation tab (Build 05)", () => {
+
+    const workflowList = {
+        repository: "demo",
+        evidenceVersion: "v1" as const,
+        count: 1,
+        workflows: [
+            {
+                id: "wf:function:src/db/connection.ts:connect",
+                title: "connect — call path",
+                entryLabel: "connect",
+                stepCount: 2,
+                pathCount: 1,
+                hasHttpBoundary: false,
+                branchCount: 0,
+                unresolvedCount: 0,
+                evidenceVersion: "v1" as const
+            }
+        ]
+    };
+
+    const workflowPayload = {
+        id: "wf:function:src/db/connection.ts:connect",
+        repository: "demo",
+        title: "connect — call path",
+        description: "Statically reconstructed candidate path through 1 resolved call.",
+        entryKey: "step:connect",
+        steps: [
+            {
+                key: "step:connect",
+                label: "connect",
+                kind: "entry",
+                entityId: "function:src/db/connection.ts:connect",
+                filePath: "src/db/connection.ts",
+                line: 2,
+                evidence: "resolved"
+            },
+            {
+                key: "step:connect->helper:1",
+                label: "helper",
+                kind: "function",
+                entityId: "function:src/utils/helpers.ts:helper",
+                filePath: "src/utils/helpers.ts",
+                line: 4,
+                evidence: "resolved"
+            }
+        ],
+        edges: [
+            {
+                from: "step:connect",
+                to: "step:connect->helper:1",
+                kind: "call",
+                evidence: "resolved"
+            }
+        ],
+        paths: [
+            {
+                id: "path:main",
+                label: "Main path",
+                kind: "main",
+                stepKeys: ["step:connect", "step:connect->helper:1"]
+            }
+        ],
+        provenance: {
+            graphFingerprint: "5:CALLS=1,CONTAINS=3:ev=2",
+            evidenceVersion: "v1",
+            resolvedCalls: 1,
+            unresolvedCalls: 0,
+            httpBoundaries: 0,
+            branchPoints: 0,
+            truncated: false,
+            maxDepth: 10,
+            maxSteps: 24
+        },
+        refinement: { state: "not-requested" }
+    };
+
+    it("sits immediately after Analysis Report and renders the workflow", async () => {
+
+        fetchWorkflows.mockResolvedValue(workflowList as never);
+        fetchWorkflow.mockResolvedValue(workflowPayload as never);
+
+        await analyze(makeGraph());
+
+        const tabs = screen.getAllByRole("button").filter((button) =>
+            ["Knowledge Graph", "Analysis Report", "Coremation"].includes(
+                button.textContent ?? ""
+            )
+        );
+
+        expect(tabs.map((tab) => tab.textContent)).toEqual([
+            "Knowledge Graph",
+            "Analysis Report",
+            "Coremation"
+        ]);
+
+        fireEvent.click(screen.getByRole("button", { name: "Coremation" }));
+
+        expect(await screen.findByText("connect — call path")).toBeInTheDocument();
+        expect(
+            await screen.findByText(/simulated traversal of a candidate path/i)
+        ).toBeInTheDocument();
+        expect(fetchWorkflows).toHaveBeenCalledWith("demo");
+    });
+
+    it("does not disturb the knowledge graph when switching back", async () => {
+
+        fetchWorkflows.mockResolvedValue(workflowList as never);
+        fetchWorkflow.mockResolvedValue(workflowPayload as never);
+
+        await analyze(makeGraph());
+
+        fireEvent.click(screen.getByRole("button", { name: "Coremation" }));
+        await screen.findByText("connect — call path");
+
+        fireEvent.click(screen.getByRole("button", { name: "Knowledge Graph" }));
+
+        /* The graph-only controls come back, proving the tab switch is clean. */
+        expect(screen.getByRole("button", { name: /Fit graph/i })).toBeInTheDocument();
+        expect(screen.getByLabelText("Search graph nodes")).toBeInTheDocument();
+    });
+
+    it("asks for a repository before showing workflows", async () => {
+
+        render(<App />);
+
+        fireEvent.click(screen.getByRole("button", { name: "Coremation" }));
+
+        /*
+         * With nothing loaded the app keeps its upload prompt; the tab must
+         * not go and ask the backend for workflows of an unknown repository.
+         */
+        expect(
+            await screen.findByText(/Upload a repository ZIP/i)
+        ).toBeInTheDocument();
+        expect(fetchWorkflows).not.toHaveBeenCalled();
     });
 });

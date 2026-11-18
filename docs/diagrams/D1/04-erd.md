@@ -28,7 +28,7 @@ erDiagram
         string category "source|test|config|fixture|generated|declaration"
         boolean inDefaultScope
     }
-    CLASS {
+    "CLASS" {
         string id PK "class:path:Name"
         string name
         string filePath
@@ -59,11 +59,11 @@ erDiagram
     REPOSITORY ||--o{ FILE : CONTAINS
     DIRECTORY ||--o{ DIRECTORY : CONTAINS
     DIRECTORY ||--o{ FILE : CONTAINS
-    FILE ||--o{ CLASS : CONTAINS
+    FILE ||--o{ "CLASS" : CONTAINS
     FILE ||--o{ FUNCTION : CONTAINS
-    CLASS ||--o{ METHOD : CONTAINS
+    "CLASS" ||--o{ METHOD : CONTAINS
     FILE ||--o{ FILE : IMPORTS
-    CLASS ||--o{ CLASS : EXTENDS
+    "CLASS" ||--o{ "CLASS" : EXTENDS
     FUNCTION ||--o{ FUNCTION : CALLS
     METHOD ||--o{ METHOD : CALLS
     FUNCTION ||--o{ METHOD : CALLS

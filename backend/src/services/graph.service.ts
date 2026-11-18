@@ -4,12 +4,16 @@ import {
 } from "../database/neo4j";
 
 import {
+    CallOccurrence,
     EntityType,
+    FileWorkflowEvidence,
     GraphData,
     GraphNode,
     GraphRelationship,
     RelationshipType
 } from "../models/graph.types";
+
+import { recallGraph, rememberedRepositories } from "./graph.store";
 
 /*
  * Allow-lists used when building Cypher labels / relationship types.
@@ -46,13 +50,97 @@ function relationshipType(type: RelationshipType): string {
 }
 
 /**
+ * Retrieval must never fail because of one malformed property, so evidence
+ * is parsed defensively and an unusable value simply yields no evidence.
+ */
+const MAX_PERSISTED_EVIDENCE_CHARS = 250_000;
+
+const EMPTY_EVIDENCE_JSON = JSON.stringify({
+    routes: [],
+    requests: [],
+    mounts: [],
+    units: [],
+    unresolved: [],
+    external: [],
+    truncated: true
+});
+
+function serializeWorkflowEvidence(
+    node: GraphNode
+): string | null {
+
+    if (!node.workflowEvidence) {
+        return null;
+    }
+
+    try {
+
+        const json = JSON.stringify(node.workflowEvidence);
+
+        return json.length > MAX_PERSISTED_EVIDENCE_CHARS
+            ? EMPTY_EVIDENCE_JSON
+            : json;
+
+    } catch {
+        return null;
+    }
+}
+
+function parseWorkflowEvidence(
+    value: unknown
+): FileWorkflowEvidence | undefined {
+
+    if (typeof value !== "string" || value === "") {
+        return undefined;
+    }
+
+    try {
+
+        const parsed = JSON.parse(value) as Partial<FileWorkflowEvidence>;
+
+        return {
+            routes: Array.isArray(parsed.routes) ? parsed.routes : [],
+            requests: Array.isArray(parsed.requests) ? parsed.requests : [],
+            mounts: Array.isArray(parsed.mounts) ? parsed.mounts : [],
+            units: Array.isArray(parsed.units) ? parsed.units : [],
+            unresolved: Array.isArray(parsed.unresolved)
+                ? parsed.unresolved
+                : [],
+            selfCalls: Array.isArray(parsed.selfCalls) ? parsed.selfCalls : [],
+            external: Array.isArray(parsed.external) ? parsed.external : [],
+            truncated: parsed.truncated === true
+        };
+
+    } catch {
+        return undefined;
+    }
+}
+
+function parseOccurrences(value: unknown): CallOccurrence[] | undefined {
+
+    if (typeof value !== "string" || value === "") {
+        return undefined;
+    }
+
+    try {
+
+        const parsed = JSON.parse(value);
+
+        return Array.isArray(parsed) ? (parsed as CallOccurrence[]) : undefined;
+
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * Persists a repository graph to Neo4j. Any previously stored graph for
  * the same repository is replaced, so re-analyzing is idempotent while
  * other repositories are left untouched.
  */
 export async function saveGraph(
     graph: GraphData,
-    repositoryName: string
+    repositoryId: string
 ): Promise<void> {
 
     const session =
@@ -65,7 +153,7 @@ export async function saveGraph(
             MATCH (n:Entity {repository: $repository})
             DETACH DELETE n
             `,
-            { repository: repositoryName }
+            { repository: repositoryId }
         );
 
         for (const node of graph.nodes) {
@@ -83,6 +171,9 @@ export async function saveGraph(
                         category: $category,
                         inDefaultScope: $inDefaultScope,
                         sourceSnippet: $sourceSnippet,
+                        isAsync: $isAsync,
+                        isExported: $isExported,
+                        workflowEvidence: $workflowEvidence,
                         repository: $repository
                     }
                 )
@@ -97,7 +188,10 @@ export async function saveGraph(
                     category: node.category ?? null,
                     inDefaultScope: node.inDefaultScope ?? null,
                     sourceSnippet: node.sourceSnippet ?? null,
-                    repository: repositoryName
+                    isAsync: node.async ?? null,
+                    isExported: node.exported ?? null,
+                    workflowEvidence: serializeWorkflowEvidence(node),
+                    repository: repositoryId
                 }
             );
         }
@@ -112,16 +206,20 @@ export async function saveGraph(
                 CREATE (source)-[r:${relationshipType(relationship.type)} {
                     line: $line,
                     filePath: $filePath,
-                    resolution: $resolution
+                    resolution: $resolution,
+                    occurrences: $occurrences
                 }]->(target)
                 `,
                 {
                     source: relationship.source,
                     target: relationship.target,
-                    repository: repositoryName,
+                    repository: repositoryId,
                     line: relationship.evidence?.line ?? null,
                     filePath: relationship.evidence?.filePath ?? null,
-                    resolution: relationship.evidence?.resolution ?? null
+                    resolution: relationship.evidence?.resolution ?? null,
+                    occurrences: relationship.occurrences
+                        ? JSON.stringify(relationship.occurrences)
+                        : null
                 }
             );
         }
@@ -133,11 +231,39 @@ export async function saveGraph(
 }
 
 /**
- * Reads a graph back out of Neo4j. When `repositoryName` is omitted the
- * whole (single-repository) graph is returned.
+ * Reads a graph back out of Neo4j, falling back to the in-memory store when
+ * the database is unavailable (or holds nothing). This is what lets the
+ * report, summary and workflow features work even when persistence was
+ * skipped because Neo4j was down.
  */
 export async function fetchGraph(
-    repositoryName?: string
+    repositoryId?: string
+): Promise<GraphData> {
+
+    try {
+
+        const graph = await fetchGraphFromNeo4j(repositoryId);
+
+        if (graph.nodes.length > 0) {
+            return graph;
+        }
+
+    } catch (error) {
+
+        console.warn(
+            `[graph] Neo4j read failed, using the in-memory graph: ${(error as Error).message}`
+        );
+    }
+
+    return recallGraph(repositoryId) ?? { nodes: [], relationships: [] };
+}
+
+/**
+ * Reads a graph back out of Neo4j. When `repositoryId` is omitted the
+ * whole (single-repository) graph is returned.
+ */
+async function fetchGraphFromNeo4j(
+    repositoryId?: string
 ): Promise<GraphData> {
 
     const session =
@@ -147,11 +273,11 @@ export async function fetchGraph(
 
         const nodeResult =
             await session.run(
-                repositoryName
+                repositoryId
                     ? `MATCH (n:Entity {repository: $repository}) RETURN n`
                     : `MATCH (n:Entity) RETURN n`,
-                repositoryName
-                    ? { repository: repositoryName }
+                repositoryId
+                    ? { repository: repositoryId }
                     : {}
             );
 
@@ -185,24 +311,42 @@ export async function fetchGraph(
                     node.sourceSnippet = properties.sourceSnippet;
                 }
 
+                if (properties.isAsync === true) {
+                    node.async = true;
+                }
+
+                if (properties.isExported === true) {
+                    node.exported = true;
+                }
+
+                const evidence = parseWorkflowEvidence(
+                    properties.workflowEvidence
+                );
+
+                if (evidence) {
+                    node.workflowEvidence = evidence;
+                }
+
                 return node;
             });
 
         const relationshipResult =
             await session.run(
-                repositoryName
+                repositoryId
                     ? `
                         MATCH (a:Entity {repository: $repository})-[r]->(b:Entity {repository: $repository})
                         RETURN a.id AS source, type(r) AS type, b.id AS target,
-                               r.line AS line, r.filePath AS filePath, r.resolution AS resolution
-                      `
+                               r.line AS line, r.filePath AS filePath, r.resolution AS resolution,
+                               r.occurrences AS occurrences
+                       `
                     : `
                         MATCH (a:Entity)-[r]->(b:Entity)
                         RETURN a.id AS source, type(r) AS type, b.id AS target,
-                               r.line AS line, r.filePath AS filePath, r.resolution AS resolution
-                      `,
-                repositoryName
-                    ? { repository: repositoryName }
+                               r.line AS line, r.filePath AS filePath, r.resolution AS resolution,
+                               r.occurrences AS occurrences
+                       `,
+                repositoryId
+                    ? { repository: repositoryId }
                     : {}
             );
 
@@ -225,6 +369,14 @@ export async function fetchGraph(
                     };
                 }
 
+                const occurrences = parseOccurrences(
+                    record.get("occurrences")
+                );
+
+                if (occurrences) {
+                    relationship.occurrences = occurrences;
+                }
+
                 return relationship;
             });
 
@@ -237,12 +389,96 @@ export async function fetchGraph(
 }
 
 /**
+ * Builds the node + direct CALLS context from the in-memory graph.
+ */
+function functionContextFromMemory(
+    repositoryId: string,
+    nodeId: string
+): { node: GraphNode; callers: string[]; callees: string[] } | null {
+
+    const graph = recallGraph(repositoryId);
+
+    if (!graph) {
+        return null;
+    }
+
+    const node = graph.nodes.find((entry) => entry.id === nodeId);
+
+    if (!node) {
+        return null;
+    }
+
+    const byId = new Map(graph.nodes.map((entry) => [entry.id, entry]));
+
+    const callers = new Set<string>();
+    const callees = new Set<string>();
+
+    for (const relationship of graph.relationships) {
+
+        if (relationship.type !== "CALLS") {
+            continue;
+        }
+
+        if (relationship.target === nodeId) {
+            const caller = byId.get(relationship.source);
+            if (caller) {
+                callers.add(caller.name);
+            }
+        }
+
+        if (relationship.source === nodeId) {
+            const callee = byId.get(relationship.target);
+            if (callee) {
+                callees.add(callee.name);
+            }
+        }
+    }
+
+    return { node, callers: [...callers], callees: [...callees] };
+}
+
+/**
+ * Returns one node plus its direct CALLS context (who calls it, what it
+ * calls) for the function-summary feature. Falls back to the in-memory
+ * graph when Neo4j is unavailable. Null when the node does not exist.
+ */
+export async function fetchFunctionContext(
+    repositoryId: string,
+    nodeId: string
+): Promise<{
+    node: GraphNode;
+    callers: string[];
+    callees: string[];
+} | null> {
+
+    try {
+
+        const context = await fetchFunctionContextFromNeo4j(
+            repositoryId,
+            nodeId
+        );
+
+        if (context) {
+            return context;
+        }
+
+    } catch (error) {
+
+        console.warn(
+            `[graph] Neo4j function-context read failed, using memory: ${(error as Error).message}`
+        );
+    }
+
+    return functionContextFromMemory(repositoryId, nodeId);
+}
+
+/**
  * Returns one node plus its direct CALLS context (who calls it, what it
  * calls) for the function-summary feature. Null when the node does not
  * exist in the repository.
  */
-export async function fetchFunctionContext(
-    repositoryName: string,
+async function fetchFunctionContextFromNeo4j(
+    repositoryId: string,
     nodeId: string
 ): Promise<{
     node: GraphNode;
@@ -261,7 +497,7 @@ export async function fetchFunctionContext(
                 MATCH (n:Entity {repository: $repository, id: $nodeId})
                 RETURN n
                 `,
-                { repository: repositoryName, nodeId }
+                { repository: repositoryId, nodeId }
             );
 
         if (nodeResult.records.length === 0) {
@@ -291,7 +527,7 @@ export async function fetchFunctionContext(
                 OPTIONAL MATCH (n)-[:CALLS]->(callee:Entity)
                 RETURN collect(caller) AS callers, collect(callee) AS callees
                 `,
-                { repository: repositoryName, nodeId }
+                { repository: repositoryId, nodeId }
             );
 
         const collect = (record: Record<string, unknown>[]): string[] => {
@@ -322,9 +558,33 @@ export async function fetchFunctionContext(
 }
 
 /**
- * Returns the names of repositories that currently have a stored graph.
+ * Returns the names of repositories that currently have a stored graph,
+ * falling back to the in-memory store when Neo4j is unavailable.
  */
 export async function listRepositories(): Promise<string[]> {
+
+    try {
+
+        const repositories = await listRepositoriesFromNeo4j();
+
+        if (repositories.length > 0) {
+            return repositories;
+        }
+
+    } catch (error) {
+
+        console.warn(
+            `[graph] Neo4j repository list failed, using memory: ${(error as Error).message}`
+        );
+    }
+
+    return rememberedRepositories();
+}
+
+/**
+ * Returns the names of repositories that currently have a stored graph.
+ */
+async function listRepositoriesFromNeo4j(): Promise<string[]> {
 
     const session =
         neo4jDriver.session({ database });

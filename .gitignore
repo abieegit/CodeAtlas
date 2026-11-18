@@ -7,6 +7,9 @@ build/
 backend/.env
 backend/.env.*
 !backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
 # Generated during ingestion / analysis
 backend/uploads/
@@ -18,3 +21,8 @@ backend/extracted/
 # Local demo recordings / media
 *.mp4
 TestRun/
+
+# Local test repositories + personal FYP documents (not part of the app)
+REPOs/
+data/
+prompts/
