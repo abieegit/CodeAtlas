@@ -1,14 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { AnalyzeResponse } from "./api";
+import type { EnqueueResponse } from "./api";
 import type { GraphData } from "./types";
 
 vi.mock("./api", () => ({
     analyzeArchive: vi.fn(),
     loadGraph: vi.fn(),
     listRepositories: vi.fn(),
+    listJobs: vi.fn(),
+    fetchJob: vi.fn(),
+    retryJob: vi.fn(),
     fetchAnalysisReport: vi.fn(),
     fetchFunctionSummary: vi.fn(),
     fetchWorkflows: vi.fn(),
@@ -17,9 +20,15 @@ vi.mock("./api", () => ({
     clearWorkflowCaches: vi.fn()
 }));
 
-const { analyzeArchive, fetchWorkflows, fetchWorkflow } = vi.mocked(
-    await import("./api")
-);
+const {
+    analyzeArchive,
+    loadGraph,
+    listJobs,
+    listRepositories,
+    fetchJob,
+    fetchWorkflows,
+    fetchWorkflow
+} = vi.mocked(await import("./api"));
 
 function makeGraph(options: { outOfScopeDb?: boolean } = {}): GraphData {
     return {
@@ -62,18 +71,42 @@ function makeGraph(options: { outOfScopeDb?: boolean } = {}): GraphData {
     };
 }
 
-function makeResponse(graph: GraphData): AnalyzeResponse {
+function makeEnqueue(): EnqueueResponse {
     return {
-        repository: "demo",
-        persisted: true,
-        nodeCount: graph.nodes.length,
-        relationshipCount: graph.relationships.length,
-        graph
+        repositoryId: "demo",
+        repositoryName: "demo",
+        jobId: "job-1",
+        status: "pending"
     };
 }
 
+beforeEach(() => {
+    listJobs.mockResolvedValue([]);
+    listRepositories.mockResolvedValue([]);
+});
+
+/**
+ * Build 07: an upload queues a job; the status panel polls until it completes,
+ * then the existing graph viewer loads the finished graph.
+ */
 async function analyze(graph: GraphData) {
-    analyzeArchive.mockResolvedValue(makeResponse(graph));
+    analyzeArchive.mockResolvedValue(makeEnqueue());
+
+    fetchJob.mockResolvedValue({
+        id: "job-1",
+        repositoryId: "demo",
+        status: "completed",
+        progress: 100,
+        stage: "completed",
+        errorMessage: null,
+        attemptCount: 1,
+        maxAttempts: 3,
+        createdAt: "2026-01-01T00:00:00Z",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:00Z"
+    });
+
+    loadGraph.mockResolvedValue(graph);
 
     const { container } = render(<App />);
 
@@ -83,8 +116,11 @@ async function analyze(graph: GraphData) {
     });
     fireEvent.click(screen.getByRole("button", { name: "Analyze repository" }));
 
-    // The status line confirms the analysis finished.
-    await screen.findByText(/demo: 3 nodes/);
+    /*
+     * The job completes → App loads the graph → the graph-only search box
+     * appears, which is what the rest of these tests interact with.
+     */
+    await screen.findByLabelText("Search graph nodes");
 
     return container;
 }

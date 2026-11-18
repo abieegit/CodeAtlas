@@ -69,6 +69,7 @@ vi.mock("../services/repositories.service", () => ({
             graph_persisted: false,
             node_count: 0,
             relationship_count: 0,
+            source_object_key: null,
             created_at: "2026-01-01T00:00:00Z",
             updated_at: "2026-01-01T00:00:00Z"
         };
@@ -81,7 +82,27 @@ vi.mock("../services/repositories.service", () => ({
     listRepositoriesForUser: vi.fn(async (userId: string) =>
         table.filter((row) => row.user_id === userId)
     ),
-    updateRepositoryOutcome: vi.fn(async () => undefined)
+    updateRepositoryOutcome: vi.fn(async () => undefined),
+    setRepositorySourceKey: vi.fn(async () => undefined),
+    deleteRepository: vi.fn(async () => undefined)
+}));
+
+/* Build 07: R2 + job creation are mocked so uploads queue without a bucket. */
+vi.mock("../services/storage.service", () => ({
+    isR2Configured: vi.fn(() => true),
+    objectKeyFor: vi.fn(
+        (userId: string, repositoryId: string) =>
+            `repositories/${userId}/${repositoryId}/source.zip`
+    ),
+    putZip: vi.fn(async () => undefined),
+    deleteObject: vi.fn(async () => undefined)
+}));
+
+vi.mock("../services/jobs.service", () => ({
+    createJob: vi.fn(async () => ({ id: "job-1", status: "pending" })),
+    findJobForUser: vi.fn(async () => null),
+    listJobsForUser: vi.fn(async () => []),
+    retryJobForUser: vi.fn(async () => null)
 }));
 
 import { app } from "../server";
@@ -116,7 +137,7 @@ describe("Build 06 — repository ownership (mocked Supabase)", () => {
     it("creates a repository owned by the uploading user", async () => {
         const response = await uploadAs(AUTH_A);
 
-        expect(response.status).toBe(201);
+        expect(response.status).toBe(202);
         expect(response.body.repositoryId).toBeDefined();
         expect(table).toHaveLength(1);
         expect(table[0].user_id).toBe("user-a");
@@ -176,8 +197,8 @@ describe("Build 06 — repository ownership (mocked Supabase)", () => {
         const a = await uploadAs(AUTH_A);
         const b = await uploadAs(AUTH_B);
 
-        expect(a.status).toBe(201);
-        expect(b.status).toBe(201);
+        expect(a.status).toBe(202);
+        expect(b.status).toBe(202);
         expect(a.body.repositoryId).not.toBe(b.body.repositoryId);
         expect(table.map((row) => row.user_id).sort()).toEqual([
             "user-a",

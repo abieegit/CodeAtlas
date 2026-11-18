@@ -16,7 +16,7 @@ export interface ExtractedRepository {
     extractionDir: string;
 }
 
-function sanitizeName(
+export function sanitizeRepositoryName(
     name: string
 ): string {
 
@@ -63,7 +63,7 @@ export async function extractZip(
     originalName: string
 ): Promise<ExtractedRepository> {
 
-    const repositoryName = sanitizeName(originalName);
+    const repositoryName = sanitizeRepositoryName(originalName);
 
     const destination =
         path.join(

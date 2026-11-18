@@ -11,6 +11,8 @@ export interface RepositoryRecord {
     graph_persisted: boolean;
     node_count: number;
     relationship_count: number;
+    /** Private R2 object key of the source ZIP (Build 07). */
+    source_object_key: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -118,5 +120,45 @@ export async function updateRepositoryOutcome(
 
     if (error) {
         throw new Error(`Could not update the repository record: ${error.message}`);
+    }
+}
+
+/**
+ * Records the private R2 object key of a repository's source ZIP (Build 07).
+ */
+export async function setRepositorySourceKey(
+    repositoryId: string,
+    userId: string,
+    objectKey: string
+): Promise<void> {
+
+    const { error } = await supabaseAdmin
+        .from("repositories")
+        .update({ source_object_key: objectKey })
+        .eq("id", repositoryId)
+        .eq("user_id", userId);
+
+    if (error) {
+        throw new Error(`Could not store the source object key: ${error.message}`);
+    }
+}
+
+/**
+ * Deletes a repository the caller owns. Used to roll back an upload that never
+ * reached storage (or whose job could not be created). Cascades to any job.
+ */
+export async function deleteRepository(
+    repositoryId: string,
+    userId: string
+): Promise<void> {
+
+    const { error } = await supabaseAdmin
+        .from("repositories")
+        .delete()
+        .eq("id", repositoryId)
+        .eq("user_id", userId);
+
+    if (error) {
+        throw new Error(`Could not delete the repository record: ${error.message}`);
     }
 }

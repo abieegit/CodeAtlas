@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { analyzeArchive, loadGraph } from "./api";
+import { analyzeArchive, listJobs, listRepositories, loadGraph } from "./api";
 import AnalysisReportView from "./components/AnalysisReportView";
 import DetailsPanel from "./components/DetailsPanel";
 import FilterPanel from "./components/FilterPanel";
@@ -8,6 +8,7 @@ import GraphView, { type GraphViewHandle } from "./components/GraphView";
 import Legend from "./components/Legend";
 import SearchPanel from "./components/SearchPanel";
 import UploadPanel from "./components/UploadPanel";
+import JobStatusPanel from "./components/JobStatusPanel";
 import CoremationView from "./components/CoremationView";
 import {
     defaultFilters,
@@ -36,6 +37,7 @@ export default function App() {
     const [view, setView] = useState<View>("graph");
     const [filters, setFilters] = useState<FilterState>(defaultFilters);
     const [showIcons, setShowIcons] = useState(false);
+    const [activeJobId, setActiveJobId] = useState("");
     const graphViewRef = useRef<GraphViewHandle | null>(null);
 
     const { user, signOut } = useAuth();
@@ -69,23 +71,18 @@ export default function App() {
 
         setBusy(true);
         setSelected(null);
-        setStatus("Extracting and analyzing repository...");
+        setStatus("Uploading repository...");
 
         try {
 
             const result = await analyzeArchive(file);
 
-            setGraph(result.graph);
-            setRepository(result.repository);
-            setRepositoryId(result.repositoryId ?? result.repository);
+            setGraph(null);
+            setRepository(result.repositoryName);
+            setRepositoryId(result.repositoryId);
             setFilters(defaultFilters());
-            setStatus(
-                `${result.repository}: ${result.nodeCount} nodes, ` +
-                    `${result.relationshipCount} relationships ` +
-                    (result.persisted
-                        ? "(stored in Neo4j)"
-                        : "(Neo4j unavailable - not persisted)")
-            );
+            setActiveJobId(result.jobId);
+            setStatus(`Queued: ${result.repositoryName} — analysis started.`);
 
         } catch (error) {
 
@@ -125,6 +122,85 @@ export default function App() {
         }
 
     }, [repositoryKey, repository]);
+
+    /**
+     * Build 07: when a job finishes, load its graph into the existing viewer.
+     */
+    const handleJobCompleted = useCallback(async (id: string) => {
+
+        setStatus("Analysis complete — loading graph...");
+
+        try {
+
+            const stored = await loadGraph(id);
+
+            setGraph(stored);
+            setFilters(defaultFilters());
+            setStatus(
+                `Loaded ${stored.nodes.length} nodes, ` +
+                    `${stored.relationships.length} relationships.`
+            );
+
+        } catch (error) {
+
+            setStatus(`Error loading graph: ${(error as Error).message}`);
+
+        } finally {
+
+            setActiveJobId("");
+        }
+
+    }, []);
+
+    /*
+     * Build 07: on load, resume any active job from the backend so a refresh
+     * (or a reopened app) keeps showing real progress instead of nothing.
+     */
+    useEffect(() => {
+
+        let active = true;
+
+        void (async () => {
+
+            try {
+
+                const jobs = await listJobs(5);
+
+                const current = jobs.find(
+                    (job) =>
+                        job.status === "pending" || job.status === "processing"
+                );
+
+                if (!active || !current) {
+                    return;
+                }
+
+                const repositories = await listRepositories().catch(
+                    () => []
+                );
+
+                const match = repositories.find(
+                    (entry) => entry.id === current.repositoryId
+                );
+
+                setRepositoryId(current.repositoryId);
+                if (match) {
+                    setRepository(match.name);
+                }
+                setActiveJobId(current.id);
+                setStatus("Resuming analysis…");
+
+            } catch {
+                /* non-fatal: nothing to resume */
+            }
+
+        })();
+
+        return () => {
+            active = false;
+        };
+
+    }, []);
 
     const visibleGraph = useMemo(
         () => (graph ? filterGraph(graph, filters) : null),
@@ -199,6 +275,13 @@ export default function App() {
                         onAnalyze={handleAnalyze}
                         onLoad={handleLoad}
                     />
+
+                    {activeJobId && (
+                        <JobStatusPanel
+                            jobId={activeJobId}
+                            onCompleted={handleJobCompleted}
+                        />
+                    )}
 
                     {graph && view === "graph" && (
                         <>

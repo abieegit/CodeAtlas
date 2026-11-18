@@ -52,5 +52,23 @@ export const env = {
          */
         publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY ?? "",
         secretKey: process.env.SUPABASE_SECRET_KEY ?? ""
+    },
+    /*
+     * Cloudflare R2 (Build 07): private object storage for uploaded ZIPs.
+     * S3-compatible; server-side only — never expose these to the browser.
+     */
+    r2: {
+        accountId: process.env.R2_ACCOUNT_ID ?? "",
+        accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+        bucketName: process.env.R2_BUCKET_NAME ?? "",
+        endpoint: process.env.R2_ENDPOINT ?? ""
+    },
+    /*
+     * Asynchronous analysis worker (Build 07).
+     */
+    worker: {
+        pollIntervalMs: Number(process.env.WORKER_POLL_INTERVAL_MS ?? 3000),
+        staleSeconds: Number(process.env.WORKER_STALE_SECONDS ?? 900)
     }
 };

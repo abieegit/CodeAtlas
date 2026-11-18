@@ -7,13 +7,24 @@ import {
 } from "express";
 
 import {
-    extractZip,
-    ExtractedRepository
+    sanitizeRepositoryName
 } from "../services/ingestion.service";
 
 import {
-    analyzeAndStore
-} from "../services/parser.service";
+    createRepository,
+    deleteRepository,
+    listRepositoriesForUser,
+    setRepositorySourceKey
+} from "../services/repositories.service";
+
+import { createJob } from "../services/jobs.service";
+
+import {
+    deleteObject,
+    isR2Configured,
+    objectKeyFor,
+    putZip
+} from "../services/storage.service";
 
 import {
     fetchGraph,
@@ -21,20 +32,9 @@ import {
 } from "../services/graph.service";
 
 import {
-    createRepository,
-    listRepositoriesForUser,
-    updateRepositoryOutcome
-} from "../services/repositories.service";
-
-import {
     isZipArchive,
-    removeDirectoryIfExists,
     removeFileIfExists
 } from "../utils/file.utils";
-
-import {
-    env
-} from "../config/env";
 
 export async function health(
     _request: Request,
@@ -50,12 +50,13 @@ export async function health(
 }
 
 /**
- * Accepts a ZIP upload, extracts it, analyzes the repository and
- * persists the resulting graph to Neo4j.
+ * Accepts a ZIP upload and QUEUES it for asynchronous analysis (Build 07).
  *
- * Build 06: the repository row is created first (owned by the verified
- * user), the id becomes the unique graph/cache key, and the row's status and
- * counts are updated when the analysis finishes.
+ * Order: validate the archive → create the repository row (owned by the
+ * verified user) → upload the ZIP to private R2 storage → record the object
+ * key → create the analysis job → return 202 immediately. The worker does the
+ * heavy lifting. Any failure rolls back what it created so no repository is
+ * left permanently "queued".
  */
 export async function analyzeRepositoryUpload(
     request: Request,
@@ -79,8 +80,6 @@ export async function analyzeRepositoryUpload(
 
     const uploadedPath = request.file.path;
 
-    let extracted: ExtractedRepository | undefined;
-
     try {
 
         const isZipName =
@@ -95,79 +94,59 @@ export async function analyzeRepositoryUpload(
             return;
         }
 
-        try {
-
-            extracted = await extractZip(
-                uploadedPath,
-                request.file.originalname
-            );
-
-        } catch (error) {
-
-            response.status(400).json({
+        if (!isR2Configured()) {
+            response.status(503).json({
                 error:
-                    `Could not read the ZIP archive: ${(error as Error).message}`
+                    "Repository storage (Cloudflare R2) is not configured on " +
+                    "the server, so uploads are temporarily unavailable."
             });
             return;
         }
 
-        const repository = await createRepository(
-            userId,
-            extracted.repositoryName
-        );
+        const repositoryName =
+            sanitizeRepositoryName(request.file.originalname);
 
-        let result;
+        const repository = await createRepository(userId, repositoryName);
+
+        const objectKey = objectKeyFor(userId, repository.id);
 
         try {
 
-            result = await analyzeAndStore(
-                extracted.repositoryPath,
-                extracted.repositoryName,
-                repository.id
-            );
+            await putZip(objectKey, uploadedPath);
+            await setRepositorySourceKey(repository.id, userId, objectKey);
 
         } catch (error) {
 
-            try {
-                await updateRepositoryOutcome(repository.id, userId, {
-                    status: "failed"
-                });
-            } catch (updateError) {
-                console.warn(
-                    `[repository] Could not mark ${repository.id} as failed: ${
-                        (updateError as Error).message
-                    }`
-                );
-            }
+            /* Nothing usable reached storage — roll the repository back. */
+            await deleteObject(objectKey).catch(() => undefined);
+            await deleteRepository(repository.id, userId).catch(() => undefined);
+
+            throw new Error(
+                `Could not store the uploaded archive: ${(error as Error).message}`
+            );
+        }
+
+        let jobId: string;
+
+        try {
+
+            const job = await createJob(repository.id, userId);
+            jobId = job.id;
+
+        } catch (error) {
+
+            /* Stored object and row are both orphaned — clean both up. */
+            await deleteObject(objectKey).catch(() => undefined);
+            await deleteRepository(repository.id, userId).catch(() => undefined);
 
             throw error;
         }
 
-        const categoryCounts: Record<string, number> = {};
-
-        for (const node of result.graph.nodes) {
-            if (node.type === "File" && node.category) {
-                categoryCounts[node.category] =
-                    (categoryCounts[node.category] ?? 0) + 1;
-            }
-        }
-
-        await updateRepositoryOutcome(repository.id, userId, {
-            status: "completed",
-            graphPersisted: result.persisted,
-            nodeCount: result.graph.nodes.length,
-            relationshipCount: result.graph.relationships.length
-        });
-
-        response.status(201).json({
-            repository: extracted.repositoryName,
+        response.status(202).json({
             repositoryId: repository.id,
-            status: "completed",
-            persisted: result.persisted,
-            nodeCount: result.graph.nodes.length,
-            relationshipCount: result.graph.relationships.length,
-            categoryCounts,
-            graph: result.graph
+            repositoryName: repository.name,
+            jobId,
+            status: "pending"
         });
 
     } catch (error) {
@@ -177,10 +156,6 @@ export async function analyzeRepositoryUpload(
     } finally {
 
         removeFileIfExists(uploadedPath);
-
-        if (extracted && !env.keepExtracted) {
-            removeDirectoryIfExists(extracted.extractionDir);
-        }
     }
 }
 

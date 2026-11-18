@@ -14,19 +14,45 @@ async function authorizationHeaders(): Promise<Record<string, string>> {
     return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export interface AnalyzeResponse {
-    repository: string;
-    repositoryId?: string;
-    status?: string;
-    persisted: boolean;
-    nodeCount: number;
-    relationshipCount: number;
-    graph: GraphData;
+export interface EnqueueResponse {
+    repositoryId: string;
+    repositoryName: string;
+    jobId: string;
+    status: string;
 }
 
+export interface AnalysisJob {
+    id: string;
+    repositoryId: string;
+    status: "pending" | "processing" | "completed" | "failed";
+    progress: number;
+    stage: string;
+    errorMessage: string | null;
+    attemptCount: number;
+    maxAttempts: number;
+    createdAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
+}
+
+export interface RepositorySummary {
+    id: string;
+    name: string;
+    status: string;
+    graphPersisted: boolean;
+    nodeCount: number;
+    relationshipCount: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+/**
+ * Uploads a ZIP and queues it for asynchronous analysis (Build 07). Returns
+ * immediately with the repository + job ids; the graph is not ready yet.
+ */
 export async function analyzeArchive(
     file: File
-): Promise<AnalyzeResponse> {
+): Promise<EnqueueResponse> {
 
     const form = new FormData();
     form.append("file", file);
@@ -46,20 +72,56 @@ export async function analyzeArchive(
             .then((body) => body.error)
             .catch(() => response.statusText);
 
-        throw new Error(message ?? "Analysis failed");
+        throw new Error(message ?? "Upload failed");
     }
 
-    const result = await response.json();
+    return response.json();
+}
 
-    /*
-     * The stored graph changed — cached core-purpose summaries for the
-     * session are now stale, so they are dropped on every analysis.
-     */
-    summaryCache.clear();
-    workflowCache.clear();
-    refinementCache.clear();
+/** One analysis job's status (ownership enforced server-side). */
+export async function fetchJob(jobId: string): Promise<AnalysisJob> {
 
-    return result;
+    const response = await fetch(
+        `${BASE}/jobs/${encodeURIComponent(jobId)}`,
+        { headers: await authorizationHeaders() }
+    );
+
+    if (!response.ok) {
+        throw new Error(await readError(response, "Could not load the job"));
+    }
+
+    return response.json();
+}
+
+/** The signed-in user's jobs, newest first. */
+export async function listJobs(limit = 20): Promise<AnalysisJob[]> {
+
+    const response = await fetch(`${BASE}/jobs?limit=${limit}`, {
+        headers: await authorizationHeaders()
+    });
+
+    if (!response.ok) {
+        throw new Error(await readError(response, "Could not load your jobs"));
+    }
+
+    const body = await response.json();
+
+    return body.jobs ?? [];
+}
+
+/** Re-queues a failed job the user owns (only when retries remain). */
+export async function retryJob(jobId: string): Promise<AnalysisJob> {
+
+    const response = await fetch(
+        `${BASE}/jobs/${encodeURIComponent(jobId)}/retry`,
+        { method: "POST", headers: await authorizationHeaders() }
+    );
+
+    if (!response.ok) {
+        throw new Error(await readError(response, "Could not retry the job"));
+    }
+
+    return response.json();
 }
 
 export async function loadGraph(
@@ -81,7 +143,7 @@ export async function loadGraph(
     return response.json();
 }
 
-export async function listRepositories(): Promise<string[]> {
+export async function listRepositories(): Promise<RepositorySummary[]> {
 
     const response = await fetch(`${BASE}/repositories`, {
         headers: await authorizationHeaders()

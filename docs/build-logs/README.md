@@ -14,18 +14,20 @@ This document is written in plain, natural language in three sections:
 2. **Every feature explained** — what each part of the product does, one by one.
 3. **The complete project workflow** — the full journey of one repository, start to finish.
 
-A note on current state: the project is at **Build 06 (auth-and-ownership)**. CodeAtlas is now
-multi-user: each user signs up and logs in through **Supabase Auth**, and every repository is
-owned by the account that uploaded it — the graph, report, function-summary and Coremation
-endpoints all verify ownership before they touch a graph. Accounts and repository records live
-in **Supabase PostgreSQL** (`profiles`, `repositories`, protected by Row Level Security). The
-old **Execution Flows** tab was removed in Build 05. The system still works with **or without a
-running Neo4j database**: if Neo4j is unavailable, the freshly analysed graph is kept in memory
-so the report, function summaries and workflow features still work.
+A note on current state: the project is at **Build 07 (upload-and-async-analysis)**. Uploads are
+now **asynchronous**: a logged-in user's ZIP is stored in **private Cloudflare R2 storage** and
+queued as a row in a PostgreSQL `analysis_jobs` table; a **separate worker process** claims the
+job, runs the existing analysis pipeline and persists the graph, while the dashboard shows the
+job's **real** status (surviving a refresh) before opening the finished graph. CodeAtlas remains
+multi-user (**Supabase Auth**, per-user repository ownership, Row Level Security). The old
+**Execution Flows** tab was removed in Build 05. Because the worker is a separate process, the
+in-memory graph fallback is per-process: **an asynchronously analysed graph is served from Neo4j**
+(the fallback still covers same-process synchronous use).
 
 **Build logs:** Build 01 `build-01-prototype-test01.md` · 02 `build-02-kg-relevance-ui.md` ·
 03 `build-03-graph-navigation.md` · 04 `build-04-analysis-reports.md` · 05 `build-05-coremation.md`
-(closed) · 06 [`build-06-auth-and-ownership.md`](./build-06-auth-and-ownership.md) (current).
+(closed) · 06 `build-06-auth-and-ownership.md` (closed) · 07
+[`build-07-upload-and-async-analysis.md`](./build-07-upload-and-async-analysis.md) (current).
 
 ---
 
@@ -45,17 +47,24 @@ so the report, function summaries and workflow features still work.
 | Config | `dotenv` | Loads `backend/.env` once, independent of the working directory |
 | Accounts + database | Supabase **PostgreSQL** + `@supabase/supabase-js` 2.119 | Auth users, `profiles`, and `repositories` (ownership); scoped by Row Level Security |
 | Authentication | Supabase **Auth** | Email/password signup, login, logout, session restore, and server-side access-token verification (JWT) |
+| Object storage | Cloudflare **R2** (S3-compatible) + `@aws-sdk/client-s3` | Private storage of uploaded ZIPs; downloaded by the worker |
+| Job queue + worker | PostgreSQL `analysis_jobs` + a separate Node worker | Durable async jobs, claimed atomically with `FOR UPDATE SKIP LOCKED` |
 | AI layer | Any OpenAI-compatible `chat/completions` endpoint (Groq by default, model `openai/gpt-oss-120b`) via the built-in `fetch` | Turns measured graph facts into readable text; no SDK, no extra packages |
 | Frontend | React 18 + D3 7 + Tailwind CSS 3, built by Vite 5 | Interactive force-directed graph and the tabbed dashboard |
 | Testing | Vitest (backend + frontend), Supertest, Testing Library, jsdom | Automated tests for the pipeline, API, persistence and UI |
 | Infrastructure | Docker Compose (Neo4j only) | One command to start a local Neo4j for the demo |
 
-There are **two applications and one database**:
+There are **three processes and three services**:
 
-- `backend/` — the analysis engine and REST API, runs on **http://localhost:5000**.
+- `backend/` (**API**) — Express REST API + analysis engine, runs on **http://localhost:5000**.
+- `backend/` (**worker**) — a **separate `node dist/worker.js` process** that runs queued jobs;
+  it must run persistently in production.
 - `frontend/` — the browser dashboard, runs on **http://localhost:5173** (its dev server
   proxies any `/api/...` request to port 5000, so there are no CORS problems in development).
-- **Neo4j** — runs on Bolt port **7687** (HTTP console on 7474). It is optional at runtime.
+- **Supabase** — Auth + PostgreSQL (accounts, ownership, and the `analysis_jobs` queue).
+- **Cloudflare R2** — private object storage for the uploaded ZIPs.
+- **Neo4j** — runs on Bolt port **7687** (HTTP console on 7474). It is required for asynchronous
+  graphs to be served back, because the in-memory fallback is per-process.
 
 ### 1.2 How the stack executes (the hand-offs, in order)
 
@@ -246,6 +255,19 @@ verifies that the caller owns the repository (else a non-disclosing 404), so one
 never read, re-analyse or delete another account's data. The previous password-less,
 single-tenant behaviour (a global graph endpoint and a global repository list) is gone.
 
+### 2.14 Asynchronous upload and the analysis worker (Build 07)
+A ZIP upload no longer waits for analysis. The API stores the archive in **private Cloudflare R2**
+(key `repositories/{userId}/{repositoryId}/source.zip`) and creates an `analysis_jobs` row, then
+answers **202** with the repository and job ids. A **separate worker process** claims the pending
+job atomically (`FOR UPDATE SKIP LOCKED`, via the `claim_analysis_job` SQL function), downloads
+the ZIP, extracts it safely, runs the existing analysis pipeline, persists the graph and updates
+the job's real **stage** and **progress** in PostgreSQL. Jobs retry in a bounded way (default 3
+attempts); a job whose worker died is recovered after a stale timeout; permanent failures (an
+unreadable archive, or one with no supported files) are not retried. The dashboard shows the job's
+persisted status (queued / processing / completed / failed) with its real stage, and resumes
+tracking after a refresh — never a simulated progress bar. There is **no Redis or other queue
+infrastructure**; PostgreSQL is the queue.
+
 ---
 
 ## Section 3 — The Complete Project Workflow (start to finish)
@@ -268,16 +290,18 @@ for Neo4j to avoid an IPv6 connection-refused.
 log in, and the session is restored automatically after a refresh. Only then is the dashboard
 reachable.
 
-**Step 2 — Upload.** The user opens the dashboard, chooses a `.zip`, and clicks **Analyze
-repository**. The browser sends the Supabase access token with the request and POSTs the file
-to `/api/repositories/analyze`; the Vite dev proxy forwards it to Express, the backend verifies
-the token, creates a repository record owned by that account, and Multer streams the file to a
-temp folder.
+**Step 2 — Upload and queue.** The user chooses a `.zip` and clicks **Analyze repository**. The
+browser sends the Supabase access token and POSTs the file to `/api/repositories/analyze`; Vite
+proxies it to Express; the backend verifies the token, checks the ZIP extension and `PK` magic
+bytes, creates a repository record owned by that account, uploads the archive to **private
+Cloudflare R2** storage and creates an `analysis_jobs` row — then replies **202** with the
+repository and job ids. No analysis happens in this request.
 
-**Step 3 — Validate and extract.** The backend confirms the ZIP extension and the `PK`
-magic bytes, then extracts the archive with `unzipper` into a timestamped folder, skipping
-zip-slip entries, and descends into a single top-level folder if present. It returns the
-repository name and its root path on disk.
+**Step 3 — The worker processes the job.** A **separate worker process** atomically claims the
+pending job (`FOR UPDATE SKIP LOCKED`), downloads the ZIP from R2, extracts it with `unzipper`
+(zip-slip protected, descending into a single top-level folder if present), and updates the job's
+real stage and progress in PostgreSQL as it goes (downloading → extracting → parsing →
+persisting). It then runs the pipeline (Step 4) and persists the graph (Step 6).
 
 **Step 4 — Analyse the code.** The pipeline orchestrator runs four phases: it scans the
 source files (skipping `node_modules`, `dist`, `.git`, etc.), Babel-parses each one and
@@ -292,14 +316,15 @@ occurrences) and a source snippet per function.
 whether it belongs in the default "Application" view. This only annotates — it never
 removes anything.
 
-**Step 6 — Persist (best effort).** The graph is written to Neo4j, scoped to this
-repository. If Neo4j is unreachable the write is skipped with a warning, and the graph is
-kept in memory instead. Either way, the graph is now available to the rest of the system.
+**Step 6 — Persist (best effort).** The worker writes the graph to Neo4j, scoped to this
+repository. If Neo4j is unreachable the write is skipped and the job records
+`graphPersisted: false` — note the worker's in-memory copy is **not** visible to the API process,
+so asynchronous graphs need Neo4j.
 
-**Step 7 — Return and render.** The API responds `201` with the repository name, whether
-it was persisted, node/relationship counts, and the full graph. The dashboard stores the
-graph in memory and renders the **Knowledge Graph** tab: the force simulation settles,
-the view auto-fits once, and the user can zoom, pan, drag, click, filter, and search.
+**Step 7 — Track and render.** The dashboard polls `GET /api/jobs/<id>` and shows the job's real
+status, stage and progress (a refresh resumes it from the backend). On completion it loads
+`GET /api/graph?repository=<id>` and renders the **Knowledge Graph** tab: the force simulation
+settles, the view auto-fits once, and the user can zoom, pan, drag, click, filter, and search.
 
 **Step 8 — Explore the graph.** Clicking a node opens the **Details panel** with its
 metadata and its outgoing/incoming relationships, each clickable to keep walking the
@@ -333,14 +358,14 @@ field by field; structure always comes from the deterministic reconstruction.
 `GET /api/graph?repository=<id>`, which — after checking that the caller owns that repository —
 reads the graph back from Neo4j (or the in-memory fallback) so the same graph re-renders.
 
-**In one line:** sign up and log in (Supabase Auth) → upload a ZIP that is owned by your
-account → safely extract → parse with Babel and resolve symbols with the TypeScript Compiler
-API → build and validate a typed knowledge graph with call occurrences and workflow evidence →
-persist it to Neo4j (or keep it in memory if the database is down) → serve it over REST, every
-request ownership-checked → explore it as an interactive graph, read an AI scalability/
-sustainability report, get AI one-line function summaries, and animate deterministically
-reconstructed candidate workflows — with the AI strictly describing what static analysis
-already proved.
+**In one line:** sign up and log in (Supabase Auth) → upload a ZIP owned by your account → store
+it in private Cloudflare R2 and queue a PostgreSQL job → a separate worker claims it and safely
+extracts → parse with Babel and resolve symbols with the TypeScript Compiler API → build and
+validate a typed knowledge graph with call occurrences and workflow evidence → persist it to Neo4j
+→ the dashboard tracks the job's real status and loads the graph when it completes → explore it as
+an interactive graph, read an AI scalability/sustainability report, get AI one-line function
+summaries, and animate deterministically reconstructed candidate workflows — with the AI strictly
+describing what static analysis already proved.
 
 > **Compatibility note.** Graphs persisted **before Build 06** were keyed by repository name and
 > are therefore unowned: no account can reach them, and re-analysing a repository under an
