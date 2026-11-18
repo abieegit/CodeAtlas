@@ -111,7 +111,7 @@ beforeEach(() => {
     fetchGraphMock.mockClear();
 });
 
-describe("Build 06 — repository ownership", () => {
+describe("Build 06 — repository ownership (mocked Supabase)", () => {
 
     it("creates a repository owned by the uploading user", async () => {
         const response = await uploadAs(AUTH_A);

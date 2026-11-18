@@ -48,7 +48,7 @@ beforeEach(() => {
     getUser.mockReset();
 });
 
-describe("Build 06 — authentication", () => {
+describe("Build 06 — authentication (mocked Supabase)", () => {
 
     it("keeps the health endpoint public", async () => {
         const response = await request(app).get("/api/health");

@@ -45,17 +45,12 @@ export const env = {
     supabase: {
         url: process.env.SUPABASE_URL ?? "",
         /*
-         * The dashboard's "Publishable key" (anon) and "Secret key"
-         * (service_role) are accepted under both the spec names and the
-         * newer dashboard names.
+         * Supabase's current API keys: the "Publishable key"
+         * (sb_publishable_...) and the "Secret key" (sb_secret_...). The
+         * secret key is backend-only. The legacy anon / service_role keys
+         * are NOT required.
          */
-        anonKey:
-            process.env.SUPABASE_ANON_KEY ??
-            process.env.SUPABASE_PUBLISHABLE_KEY ??
-            "",
-        serviceRoleKey:
-            process.env.SUPABASE_SERVICE_ROLE_KEY ??
-            process.env.SUPABASE_SECRET_KEY ??
-            ""
+        publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY ?? "",
+        secretKey: process.env.SUPABASE_SECRET_KEY ?? ""
     }
 };

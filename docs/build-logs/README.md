@@ -258,10 +258,10 @@ the backend (`cd backend && npm run dev` → port 5000) and the frontend
 (`docker compose up -d neo4j`, Neo4j Desktop, or Aura). If Neo4j is not running, everything
 still works — only persistence is skipped. The required `backend/.env` holds the Neo4j
 connection details, the optional `LLM_API_KEY` (with `LLM_API_BASE_URL`, `LLM_MODEL`,
-`LLM_API_TIMEOUT_MS`), and the `SUPABASE_URL` / `SUPABASE_ANON_KEY` /
-`SUPABASE_SERVICE_ROLE_KEY` values; `frontend/.env.local` holds `VITE_SUPABASE_URL` /
-`VITE_SUPABASE_ANON_KEY`. Use `127.0.0.1` rather than `localhost` for Neo4j to avoid an IPv6
-connection-refused.
+`LLM_API_TIMEOUT_MS`), and the `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` /
+`SUPABASE_SECRET_KEY` values (Supabase's current key names); `frontend/.env.local` holds
+`VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY`. Use `127.0.0.1` rather than `localhost`
+for Neo4j to avoid an IPv6 connection-refused.
 
 **Step 1b — Create an account and log in.** The dashboard is protected. A new user signs up
 (name, email, password) and confirms their email if confirmation is enabled; returning users

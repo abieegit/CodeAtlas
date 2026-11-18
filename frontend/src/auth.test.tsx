@@ -83,7 +83,7 @@ afterEach(() => {
     cleanup();
 });
 
-describe("Build 06 — frontend authentication", () => {
+describe("Build 06 — frontend authentication (mocked Supabase)", () => {
 
     it("shows a loading state while the session is restored", () => {
         authMock.getSession.mockReturnValue(new Promise(() => undefined) as never);

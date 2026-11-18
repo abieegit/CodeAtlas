@@ -82,7 +82,7 @@ The change is **additive**. The analysis pipeline is untouched.
 - `backend/src/__tests__/ownership.api.test.ts` — two-user ownership tests.
 
 **Frontend**
-- `frontend/src/lib/supabase.ts` — browser Supabase client (anon key only).
+- `frontend/src/lib/supabase.ts` — browser Supabase client (publishable key only).
 - `frontend/src/auth/AuthContext.tsx` — session state, signup/login/logout/reset.
 - `frontend/src/auth/AuthGate.tsx` — protected-dashboard boundary.
 - `frontend/src/components/AuthScreen.tsx` — CodeAtlas-styled login/signup/reset screen.
@@ -97,7 +97,7 @@ The change is **additive**. The analysis pipeline is untouched.
 ## 5. Modified files
 
 **Backend**
-- `backend/src/config/env.ts` — `env.supabase` (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
+- `backend/src/config/env.ts` — `env.supabase` (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`).
 - `backend/src/server.ts` — register `authRoutes`; validate Supabase config at startup.
 - `backend/src/routes/repository.routes.ts`, `analysis.routes.ts`, `workflow.routes.ts` —
   `requireAuth` (+ `requireOwnedRepository`) on every protected route; `/api/graph` now
@@ -155,7 +155,7 @@ Also: indexes `repositories(user_id)` and `repositories(user_id, created_at desc
 `repositories`, with `with check (auth.uid() = user_id)` on insert/update so a user cannot
 create a repository for, or hand one to, someone else. `anon` gets no access.
 
-> The backend uses the service-role key, which **bypasses RLS**, so every backend statement is
+> The backend uses the Secret key, which **bypasses RLS**, so every backend statement is
 > additionally scoped by the verified `user_id` in code. RLS is defence-in-depth.
 
 ## 7. Environment variables
@@ -163,14 +163,17 @@ create a repository for, or hand one to, someone else. `anon` gets no access.
 | Where | Variable | Purpose |
 | --- | --- | --- |
 | backend `.env` | `SUPABASE_URL` | Supabase project URL |
-| backend `.env` | `SUPABASE_ANON_KEY` | public key (validated at startup) |
-| backend `.env` | `SUPABASE_SERVICE_ROLE_KEY` | backend DB + token verification (**never** in the browser) |
+| backend `.env` | `SUPABASE_PUBLISHABLE_KEY` | publishable key (`sb_publishable_...`), validated at startup |
+| backend `.env` | `SUPABASE_SECRET_KEY` | secret key (`sb_secret_...`); backend DB + token verification (**never** in the browser) |
 | frontend `.env.local` | `VITE_SUPABASE_URL` | browser client URL |
-| frontend `.env.local` | `VITE_SUPABASE_ANON_KEY` | browser anon key |
+| frontend `.env.local` | `VITE_SUPABASE_PUBLISHABLE_KEY` | browser publishable key |
 
-Placeholders are in `backend/.env.example` and `frontend/.env.example`. Real `.env` files remain
-gitignored (`.gitignore` now also covers `frontend/.env*`). Existing Neo4j and LLM variables are
-unchanged. Startup fails fast with a clear message if the three backend variables are missing.
+These are Supabase's **current** key names; the legacy `anon` / `service_role` names are not
+required. Placeholders are in `backend/.env.example` and `frontend/.env.example`. Real `.env`
+files remain gitignored (`.gitignore` covers `frontend/.env*`). Existing Neo4j and LLM variables
+are unchanged. Startup fails fast with a clear "Supabase is not configured. Missing: …" message
+if any of the three backend variables is missing. **No Supabase project, key or migration is
+assumed to exist** — §16 gives the exact setup.
 
 ## 8. Authentication flow
 
@@ -223,8 +226,9 @@ unchanged. Startup fails fast with a clear message if the three backend variable
 ## 11. Security measures
 
 - Token verification only through the Supabase SDK server-side check; no hand-rolled JWT crypto.
-- The service-role key lives only in the backend; the browser only ever gets the anon key.
-- No credentials or tokens are logged; the service-role key is never serialised to a response.
+- The secret key (`sb_secret_...`) lives only in the backend; the browser only ever gets the
+  publishable key (`sb_publishable_...`).
+- No credentials or tokens are logged; the secret key is never serialised to a response.
 - Identity for ownership always comes from the verified token, never from a client-supplied id.
 - Ownership is checked before every graph read/write; failures are non-disclosing 404s.
 - RLS enabled on both tables; column-level grants limit profile updates; `with check` clauses
@@ -251,32 +255,44 @@ signup password validation; login → dashboard on session; login error; logout 
 
 **Frontend — existing:** `App.test.tsx` and all component suites unchanged and green.
 
+**Mocked vs. live.** Every test above uses a **mocked** Supabase client (`vi.mock`), so a green
+run proves the *wiring*, not that a real project or the migration exists, and needs no
+credentials. One test is different: `supabase.integration.test.ts` is a **live** integration
+test. It **runs only when `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are set**, and then asserts the
+real project exposes the `profiles` and `repositories` tables (i.e. the migration is applied);
+otherwise it self-skips. It is the test that separates "the mocks pass" from "the real Supabase
+project is set up".
+
 ## 13. Actual test counts
 
 | Suite | Baseline (before Build 06) | After Build 06 |
 | --- | --- | --- |
-| Backend | 13 files / 116 tests (115 passing, 1 skipped/gated) | **15 files / 127 tests (126 passing, 1 skipped/gated)** |
+| Backend | 13 files / 116 tests (115 passing, 1 skipped/gated) | **16 files / 128 tests (127 passing, 1 skipped/gated)** |
 | Frontend | 13 files / 116 tests (all passing) | **14 files / 124 tests (all passing)** |
 
-(The one skipped test in each run is the same gated live-Neo4j round-trip, which self-skips when
-the database is down.)
+The 1 skipped backend test is the gated live-Neo4j round-trip (Neo4j is not running here). The
+**live Supabase integration test ran and passed** against the configured project, confirming the
+migration is applied and both tables exist. All auth/ownership resolve and route tests are mocked.
 
 ## 14. Build verification results
 
 - Backend `npx tsc --noEmit` — **clean**; `npm run build` (`tsc -p tsconfig.build.json`) — **clean**.
 - Frontend `npx tsc -p tsconfig.json --noEmit` — **clean**; `npm run build` (`tsc && vite build`)
   — **clean** (659 modules transformed, up from 612 with the Supabase SDK).
-- `npm test` — backend **15 files / 126 passing, 1 skipped**; frontend **14 files / 124 passing**.
-- Supabase/PostgreSQL/RLS behaviour is exercised by mocked tests + the manual checklist (§16);
-  the live Neo4j round-trip test is unchanged and self-skips without a database.
+- `npm test` — backend **16 files / 127 passing, 1 skipped**; frontend **14 files / 124 passing**.
+- The **live Supabase integration test passed** against the real project (both `profiles` and
+  `repositories` query cleanly), so the migration is verified as applied — not merely mocked. RLS
+  row-isolation itself is covered by the mocked ownership tests plus the two-account manual
+  checklist (§16). The live Neo4j round-trip test is unchanged and self-skips without a database.
 
 ## 15. Known limitations
 
 - **Pre-Build-06 stored graphs are unowned and not reachable.** They were keyed by name, so no
   account owns them. They are not migrated silently; re-analysing a repository under an account
   creates a fresh, owned record (documented, not hidden).
-- **RLS is verified manually**, not by an automated live-Supabase test (the suite uses mocked
-  clients by design, so no real credentials are needed to run it).
+- **RLS row-isolation is verified manually** (two accounts, §16). The live Supabase integration
+  test checks connectivity and that the tables exist, but it does not assert RLS policy behaviour
+  against a real second user.
 - **No rate limiting / abuse protection** on the auth or upload endpoints yet.
 - **`npm audit` reports 3 pre-existing advisories** in transitive deps (`body-parser`, `multer`,
   `qs` via Express/Multer) — present before this build and not introduced by the Supabase SDK.
@@ -287,18 +303,22 @@ the database is down.)
 
 ## 16. Manual setup instructions
 
-1. **Create a Supabase project.** From *Project Settings → API*, copy the **Project URL**, the
-   **anon** key, and the **service_role** key.
-2. **Apply the migration.** In the Supabase SQL editor, run
-   `supabase/migrations/0001_build06_auth_and_ownership.sql` (or `supabase db push` with the
-   CLI). Confirm `profiles` and `repositories` exist with RLS enabled.
+1. **Create a Supabase project** (nothing here assumes one exists). From *Project Settings → API*,
+   copy the **Project URL**, the **Publishable key** (`sb_publishable_...`), and the **Secret key**
+   (`sb_secret_...`).
+2. **Apply the migration** — it is generated but **not** auto-applied. Two ways:
+   - **SQL editor:** open `supabase/migrations/0001_build06_auth_and_ownership.sql`, copy the whole
+     file, paste it into the dashboard's SQL editor, and Run.
+   - **CLI:** `supabase link --project-ref <ref>` then `supabase db push`.
+   Confirm `profiles` and `repositories` exist with RLS enabled (the gated integration test
+   checks this automatically once the env is set).
 3. **Auth settings.** Enable the **Email** provider. Decide whether email confirmation is on
    (if on, users must confirm before logging in). Add `http://localhost:5173` to the Site URL /
    Redirect URLs, and enable password recovery.
-4. **Backend env.** In `backend/.env` (gitignored) set `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`. Keep the existing Neo4j and LLM values.
+4. **Backend env.** In `backend/.env` (gitignored) set `SUPABASE_URL`,
+   `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`. Keep the existing Neo4j and LLM values.
 5. **Frontend env.** Copy `frontend/.env.example` to `frontend/.env.local` and set
-   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 6. **Run.** `cd backend && npm run dev` (port 5000) and `cd frontend && npm run dev` (port 5173);
    optionally `docker compose up -d neo4j`. Sign up, confirm the email if required, log in, and
    upload a ZIP.
